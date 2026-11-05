@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2; // 2: Msg::Audio (shifted variant numbers)
 pub const DEFAULT_PORT: u16 = 24850;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
