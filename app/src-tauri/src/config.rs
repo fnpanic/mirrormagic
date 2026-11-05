@@ -63,6 +63,10 @@ impl Default for Config {
     }
 }
 
+pub fn dir() -> PathBuf {
+    path().parent().unwrap().to_path_buf()
+}
+
 fn path() -> PathBuf {
     #[cfg(windows)]
     let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_default();

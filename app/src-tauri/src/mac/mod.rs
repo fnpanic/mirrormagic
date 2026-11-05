@@ -235,6 +235,7 @@ fn mirror(on: bool) {
     if config::get().mirrored == on {
         return;
     }
+    status::log(format!("mirror {on}"));
     match sys::set_mirror(on) {
         Ok(()) => {
             config::update(|c| c.mirrored = on);
@@ -246,7 +247,10 @@ fn mirror(on: bool) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
-        Err(e) => status::update(|s| s.last_error = format!("could not {} the screen: {e}", if on { "mirror" } else { "unmirror" })),
+        Err(e) => {
+            status::log(format!("mirror {on} failed: {e}"));
+            status::update(|s| s.last_error = format!("could not {} the screen: {e}", if on { "mirror" } else { "unmirror" }));
+        }
     }
 }
 
@@ -258,6 +262,7 @@ fn set_control(c: &str) {
 fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
     match m {
         Msg::Enter { mode, side, along } => {
+            status::log(format!("enter {mode:?}"));
             mirror(mode == Mode::Monitor);
             let info = refresh(); // displays may have changed (HDMI plugged, lid closed)
             let _ = utx.send(info);

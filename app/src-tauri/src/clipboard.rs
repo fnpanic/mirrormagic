@@ -108,8 +108,11 @@ pub fn hand_over(send: impl FnOnce(Msg) + Send + 'static) {
         let _g = BUSY.lock().unwrap();
         if let Some(m) = take() {
             let what = describe(&m);
+            crate::status::log(format!("clipboard: sending {what}"));
             send(m);
             crate::status::update(|s| s.clipboard = format!("sent {what}"));
+        } else {
+            crate::status::log("clipboard: nothing new to hand over (empty, unchanged, or sharing off)");
         }
     });
 }
@@ -122,6 +125,7 @@ pub fn receive(text: Option<String>, html: Option<String>, png: Option<Vec<u8>>)
     let what = describe(&Msg::Clipboard { text: text.clone(), html: None, png: None });
     let what = format!("{what}{}{}", if html.is_some() { " +formatting" } else { "" }, if png.is_some() { " +image" } else { "" });
     crate::status::update(|s| s.clipboard = format!("received {what}"));
+    crate::status::log(format!("clipboard: received {what}"));
     let _g = BUSY.lock().unwrap();
     let Ok(mut cb) = arboard::Clipboard::new() else { return };
     let image = png.as_deref().and_then(decode_png);
@@ -135,6 +139,10 @@ pub fn receive(text: Option<String>, html: Option<String>, png: Option<Vec<u8>>)
         (Some((w, h, px)), None, None) => cb.set_image(arboard::ImageData { width: w, height: h, bytes: Cow::Owned(px) }),
         _ => Ok(()),
     };
+    match &r {
+        Ok(()) => crate::status::log("clipboard: written"),
+        Err(e) => crate::status::log(format!("clipboard: write failed: {e}")),
+    }
     if let Err(e) = r {
         log::warn!("clipboard write failed: {e}");
     }

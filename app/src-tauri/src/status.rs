@@ -67,6 +67,23 @@ pub fn get() -> Status {
     cell().lock().unwrap().clone()
 }
 
+/// Appends a timestamped line to MirrorMagic.log next to config.json (kept below 1 MB), so
+/// problems on either machine can be diagnosed after the fact.
+pub fn log(msg: impl AsRef<str>) {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _g = LOCK.lock().unwrap();
+    let p = crate::config::dir().join("MirrorMagic.log");
+    if std::fs::metadata(&p).map(|m| m.len() > 1 << 20).unwrap_or(false) {
+        let _ = std::fs::rename(&p, p.with_extension("log.old"));
+    }
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let line = format!("{t} {}\n", msg.as_ref());
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
 pub fn update(f: impl FnOnce(&mut Status)) {
     f(&mut cell().lock().unwrap());
     if let Some(tx) = TX.get() {
