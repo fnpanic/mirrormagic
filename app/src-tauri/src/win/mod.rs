@@ -53,6 +53,58 @@ pub fn hide_cursor(hide: bool) {
     }
 }
 
+/// Hide/show requests come from the hook thread and the network thread; one worker applies
+/// the latest wanted state, so a quick enter/leave can never end with a hidden cursor.
+pub fn set_cursor_hidden(hide: bool) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{mpsc, Mutex, OnceLock};
+    static WANT: AtomicBool = AtomicBool::new(false);
+    static TX: OnceLock<Mutex<mpsc::Sender<()>>> = OnceLock::new();
+    WANT.store(hide, Ordering::SeqCst);
+    let tx = TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let mut hidden = false;
+            while rx.recv().is_ok() {
+                let want = WANT.load(Ordering::SeqCst);
+                if want != hidden {
+                    hide_cursor(want);
+                    hidden = want;
+                }
+            }
+        });
+        Mutex::new(tx)
+    });
+    let _ = tx.lock().unwrap().send(());
+}
+
+pub fn cursor_pos() -> Option<(f64, f64)> {
+    let mut p = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+    (unsafe { GetCursorPos(&mut p) } != 0).then_some((p.x as f64, p.y as f64))
+}
+
+/// Is the key with this scan code physically down right now?
+pub fn key_down(scan: u16) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, MapVirtualKeyW, MAPVK_VSC_TO_VK_EX};
+    let code = if scan & 0xE000 == 0xE000 { 0xE000 | (scan & 0xFF) as u32 } else { scan as u32 };
+    let vk = unsafe { MapVirtualKeyW(code, MAPVK_VSC_TO_VK_EX) };
+    // unknown keys (e.g. the fake AltGr Ctrl) can't be queried: treat as released
+    vk != 0 && unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 != 0
+}
+
+pub fn button_down(b: mm_core::proto::Button) -> bool {
+    use mm_core::proto::Button;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON, VK_XBUTTON1, VK_XBUTTON2};
+    let vk = match b {
+        Button::Left => VK_LBUTTON,
+        Button::Right => VK_RBUTTON,
+        Button::Middle => VK_MBUTTON,
+        Button::Back => VK_XBUTTON1,
+        Button::Forward => VK_XBUTTON2,
+    };
+    unsafe { GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0 }
+}
+
 pub fn restore_cursors() {
     unsafe { SystemParametersInfoW(SPI_SETCURSORS, 0, null_mut(), 0) };
 }

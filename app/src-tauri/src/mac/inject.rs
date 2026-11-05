@@ -13,8 +13,8 @@ const LINE_UNITS: u32 = 1;
 pub struct Injector {
     keys: KeyTranslator,
     flags: MacFlags,
-    /// held buttons: left, right, other (middle/back/forward)
-    held: [bool; 3],
+    /// held buttons: left, right, middle, back, forward
+    held: [bool; 5],
     last_click: Option<(Button, Instant, CGPoint)>,
     clicks: i64,
     scroll_rest: (i32, i32),
@@ -32,7 +32,7 @@ pub fn cursor() -> Option<(f64, f64)> {
 
 impl Injector {
     pub fn new(iso: bool, german: bool) -> Self {
-        Injector { keys: KeyTranslator::new(iso, german), flags: MacFlags::default(), held: [false; 3], last_click: None, clicks: 1, scroll_rest: (0, 0), invert_scroll: false }
+        Injector { keys: KeyTranslator::new(iso, german), flags: MacFlags::default(), held: [false; 5], last_click: None, clicks: 1, scroll_rest: (0, 0), invert_scroll: false }
     }
 
     fn flags(&self) -> CGEventFlags {
@@ -69,7 +69,7 @@ impl Injector {
             (CGEventType::LeftMouseDragged, CGMouseButton::Left)
         } else if self.held[1] {
             (CGEventType::RightMouseDragged, CGMouseButton::Right)
-        } else if self.held[2] {
+        } else if self.held[2..].iter().any(|h| *h) {
             (CGEventType::OtherMouseDragged, CGMouseButton::Center)
         } else {
             (CGEventType::MouseMoved, CGMouseButton::Left)
@@ -99,7 +99,7 @@ impl Injector {
                     Button::Back => 3,
                     _ => 4,
                 };
-                (if d { CGEventType::OtherMouseDown } else { CGEventType::OtherMouseUp }, CGMouseButton::Center, 2, n)
+                (if d { CGEventType::OtherMouseDown } else { CGEventType::OtherMouseUp }, CGMouseButton::Center, n as usize, n)
             }
         };
         self.held[slot] = down;
@@ -148,7 +148,7 @@ impl Injector {
         for (code, down) in self.keys.release_all() {
             self.post_key(code, down);
         }
-        for (i, b) in [Button::Left, Button::Right, Button::Middle].into_iter().enumerate() {
+        for (i, b) in [Button::Left, Button::Right, Button::Middle, Button::Back, Button::Forward].into_iter().enumerate() {
             if self.held[i] {
                 self.button(b, false);
             }

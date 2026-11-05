@@ -305,11 +305,33 @@ impl Primary {
     pub fn connected(&mut self) -> Out {
         self.connected = true;
         let mut out = Out::default();
-        if self.monitor_on_mac && self.state == State::Local {
-            self.enter(Mode::Monitor, 0.5, &mut out); // Mac reconnected while the monitor shows it
+        match self.state {
+            // Mac reconnected while the monitor shows it
+            State::Local if self.monitor_on_mac => self.enter(Mode::Monitor, 0.5, &mut out),
+            // a new Mac session replaced one that had control: its cursor logic starts inactive,
+            // so tell it again where control is instead of injecting blind
+            State::Remote { mode } => self.enter(mode, 0.5, &mut out),
+            State::Local => {}
         }
         out.actions.push(Action::Status);
         out
+    }
+
+    /// The OS put the parked cursor somewhere else than asked (clamped to a monitor that just
+    /// disappeared, layout change): deltas must be measured from where it really is.
+    pub fn set_park(&mut self, x: f64, y: f64) {
+        self.park = (x, y);
+    }
+
+    /// Forgets keys/buttons whose release never reached the hook (Ctrl+Alt+Del, UAC, lock
+    /// screen, a dropped hook). Call only while Local; `is_down` asks the OS for the real state.
+    pub fn prune(&mut self, is_down_key: impl Fn(u16) -> bool, is_down_button: impl Fn(Button) -> bool) {
+        if self.state != State::Local {
+            return;
+        }
+        self.keys.retain(|&scan, _| is_down_key(scan));
+        self.buttons.retain(|&b, _| is_down_button(b));
+        self.mods.retain(&is_down_key);
     }
 
     pub fn disconnected(&mut self) -> Out {
@@ -487,6 +509,34 @@ mod tests {
         p.on_leave(0.5);
         assert!(!p.button(Button::Left, true).block);
         assert!(!p.wheel(0, 120).block);
+    }
+
+    #[test]
+    fn ctrl_alt_del_does_not_kill_keys_forever() {
+        let mut p = pc();
+        p.mouse_move(0.0, 10.0);
+        p.key(0x1D, true); // Ctrl down on the Mac side…
+        p.key(0x38, true); // …Alt…  then Del: the secure desktop eats both releases
+        p.release_now();
+        assert!(p.key(0x1D, true).block); // stale owner: Ctrl would stay dead on the PC
+        p.prune(|_| false, |_| false); // OS says nothing is held
+        assert!(!p.key(0x1D, true).block);
+        p.key(0x1D, false);
+        // stale modifiers no longer block the hotkey either
+        p.key(0x1D, true);
+        p.key(0x38, true);
+        assert!(p.key(0x32, true).actions.contains(&Action::SwitchMonitor(true)));
+    }
+
+    #[test]
+    fn park_follows_the_real_cursor_and_replacement_sessions_resync() {
+        let mut p = pc();
+        p.mouse_move(0.0, 10.0);
+        p.set_park(100.0, 100.0); // the monitor vanished, Windows clamped the cursor here
+        assert_eq!(sent(&p.mouse_move(103.0, 99.0)), vec![Msg2::Motion { dx: 3, dy: -1 }]);
+        // a new Mac session arrives while the old one had control
+        let o = p.connected();
+        assert_eq!(sent(&o), vec![Msg2::Enter { mode: Mode::Edge, side: Side::Right, along: 0.5 }]);
     }
 
     #[test]

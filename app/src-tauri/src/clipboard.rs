@@ -10,6 +10,8 @@ use std::sync::Mutex;
 
 const MAX_TEXT: usize = 8 << 20;
 const MAX_PNG: usize = 12 << 20;
+/// Whole message stays under the channel limit (16 MiB) with room to spare.
+const MAX_TOTAL: usize = 14 << 20;
 
 /// Fingerprint of what the clipboard held when it last crossed (either way), so an unchanged
 /// clipboard isn't sent back and forth (and clipboard managers don't get duplicates).
@@ -71,7 +73,16 @@ fn take() -> Option<Msg> {
         }
         *last = Some(fp);
     }
-    let png = img.and_then(|i| encode_png(i.width, i.height, &i.bytes)).filter(|p| p.len() <= MAX_PNG);
+    let mut png = img.and_then(|i| encode_png(i.width, i.height, &i.bytes)).filter(|p| p.len() <= MAX_PNG);
+    let mut html = html;
+    let size = |t: &Option<String>, h: &Option<String>, p: &Option<Vec<u8>>| t.as_ref().map_or(0, |s| s.len()) + h.as_ref().map_or(0, |s| s.len()) + p.as_ref().map_or(0, |v| v.len());
+    // too big for one hand-over: drop the formatting first, then the picture
+    if size(&text, &html, &png) > MAX_TOTAL {
+        html = None;
+    }
+    if size(&text, &html, &png) > MAX_TOTAL {
+        png = None;
+    }
     Some(Msg::Clipboard { text, html, png })
 }
 
@@ -106,6 +117,11 @@ pub fn receive(text: Option<String>, html: Option<String>, png: Option<Vec<u8>>)
     if let Err(e) = r {
         log::warn!("clipboard write failed: {e}");
     }
+    // Fingerprint what the OS now returns (images come back with converted pixels), so the
+    // next hand-over recognises an unchanged clipboard and doesn't bounce it back.
+    let text = cb.get_text().ok().filter(|t| !t.is_empty());
+    let img = cb.get_image().ok();
+    *LAST.lock().unwrap() = Some(fingerprint(text.as_deref(), img.as_ref().map(|i| (i.width, i.height, i.bytes.as_ref()))));
 }
 
 #[cfg(test)]

@@ -325,7 +325,8 @@ fn camera_watch() {
 async fn camera_stream() {
     while CAM_WANTED.load(Ordering::SeqCst) {
         if let Ok((_tx, mut rx, _, _)) = open(Channel::Camera).await {
-            while let Ok(Msg::Frame { jpeg }) = rx.recv().await {
+            // a dead connection (PC asleep, Wi-Fi roam) must not freeze OBS on the last frame
+            while let Ok(Ok(Msg::Frame { jpeg })) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
                 let _ = FRAMES.get().unwrap().send(Some(Arc::new(jpeg)));
             }
         }

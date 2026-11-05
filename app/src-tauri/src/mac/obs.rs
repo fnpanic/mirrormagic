@@ -27,8 +27,71 @@ fn ws_config_path() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json")
 }
 
-/// Enables obs-websocket with our password. Only safe while OBS is not running (it rewrites the file on exit).
+/// Sets `key=value` lines inside `[section]` of an INI text, adding what is missing.
+pub fn ini_upsert(text: &str, section: &str, pairs: &[(&str, String)]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut done = vec![false; pairs.len()];
+    let mut in_sec = false;
+    let mut seen_sec = false;
+    let flush = |out: &mut Vec<String>, done: &mut Vec<bool>| {
+        for (i, (k, v)) in pairs.iter().enumerate() {
+            if !done[i] {
+                out.push(format!("{k}={v}"));
+                done[i] = true;
+            }
+        }
+    };
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            if in_sec {
+                flush(&mut out, &mut done);
+            }
+            in_sec = t == format!("[{section}]");
+            seen_sec |= in_sec;
+        } else if in_sec {
+            if let Some(i) = pairs.iter().position(|(k, _)| t.split('=').next() == Some(*k)) {
+                out.push(format!("{}={}", pairs[i].0, pairs[i].1));
+                done[i] = true;
+                continue;
+            }
+        }
+        out.push(line.to_string());
+    }
+    if in_sec {
+        flush(&mut out, &mut done);
+    }
+    if !seen_sec {
+        out.push(format!("[{section}]"));
+        flush(&mut out, &mut done);
+    }
+    out.join("\n") + "\n"
+}
+
+/// Enables obs-websocket with our password. Only safe while OBS is not running (it rewrites
+/// its files on exit). OBS 30+ keeps these in user.ini/global.ini, older ones in config.json.
 fn write_ws_config(password: &str) -> std::io::Result<()> {
+    let dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Application Support/obs-studio");
+    let pairs = [
+        ("FirstLoad", "false".to_string()),
+        ("ServerEnabled", "true".to_string()),
+        ("ServerPort", PORT.to_string()),
+        ("AlertsEnabled", "false".to_string()),
+        ("AuthRequired", "true".to_string()),
+        ("ServerPassword", password.to_string()),
+    ];
+    std::fs::create_dir_all(&dir)?;
+    let mut wrote = false;
+    for f in ["user.ini", "global.ini"] {
+        let p = dir.join(f);
+        if let Ok(t) = std::fs::read_to_string(&p) {
+            std::fs::write(&p, ini_upsert(&t, "OBSWebSocket", &pairs))?;
+            wrote = true;
+        }
+    }
+    if !wrote {
+        std::fs::write(dir.join("user.ini"), ini_upsert("", "OBSWebSocket", &pairs))?;
+    }
     let p = ws_config_path();
     std::fs::create_dir_all(p.parent().unwrap())?;
     let mut v: Value = std::fs::read(&p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}));
@@ -123,7 +186,7 @@ pub async fn ensure(stream_url: &str, start_obs: bool) -> Result<String, String>
                 c = Some(x);
                 break;
             }
-            Err(e) if e.contains("password") => return Err("OBS uses a different websocket password: quit OBS and press Set up again".into()),
+            Err(e) if e.contains("password") || e.contains("4009") || e.contains("uthentication") => return Err("OBS uses a different websocket password: quit OBS and press Set up again".into()),
             Err(_) => tokio::time::sleep(Duration::from_millis(500)).await,
         }
     }
@@ -161,4 +224,18 @@ pub async fn ensure(stream_url: &str, start_obs: bool) -> Result<String, String>
         c.call("StartVirtualCam", json!({})).await?;
     }
     Ok("OBS Virtual Camera is on and shows the PC camera".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ini_upsert;
+
+    #[test]
+    fn ini_upsert_updates_adds_and_creates() {
+        let t = "[General]\nName=x\n[OBSWebSocket]\nServerEnabled=false\nServerPort=4455\n[Video]\nW=1\n";
+        let out = ini_upsert(t, "OBSWebSocket", &[("ServerEnabled", "true".into()), ("ServerPassword", "pw".into())]);
+        assert_eq!(out, "[General]\nName=x\n[OBSWebSocket]\nServerEnabled=true\nServerPort=4455\nServerPassword=pw\n[Video]\nW=1\n");
+        assert_eq!(ini_upsert("", "S", &[("A", "1".into())]), "[S]\nA=1\n");
+        assert_eq!(ini_upsert("[S]\nA=0", "S", &[("A", "1".into())]), "[S]\nA=1\n");
+    }
 }

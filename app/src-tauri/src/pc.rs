@@ -50,10 +50,18 @@ fn run(out: Out) -> bool {
                 }
                 send(m.to_msg())
             }
-            Action::Warp(x, y) => win::warp(x, y),
-            Action::HideCursor(h) => {
-                std::thread::spawn(move || win::hide_cursor(h));
+            Action::Warp(x, y) => {
+                win::warp(x, y);
+                // Windows may clamp the park point (e.g. the monitor dropped off after a DDC
+                // switch): measure deltas from where the cursor really is
+                if let Some((cx, cy)) = win::cursor_pos().filter(|p| *p != (x.round(), y.round())) {
+                    let mut p = primary();
+                    if p.state != State::Local {
+                        p.set_park(cx, cy);
+                    }
+                }
             }
+            Action::HideCursor(h) => win::set_cursor_hidden(h),
             Action::SwitchMonitor(to_mac) => switch_monitor(to_mac),
             Action::Status => publish(),
         }
@@ -113,8 +121,17 @@ pub fn send(m: Msg) {
     }
 }
 
+/// Newest monitor request; DDC threads that were overtaken by a newer toggle do nothing.
+static DDC_SEQ: AtomicU64 = AtomicU64::new(0);
+static DDC_RUN: Mutex<()> = Mutex::new(());
+
 fn switch_monitor(to_mac: bool) {
+    let seq = DDC_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
+        let _g = DDC_RUN.lock().unwrap();
+        if DDC_SEQ.load(Ordering::SeqCst) != seq {
+            return;
+        }
         let c = config::get();
         let result = if to_mac {
             // learn the PC's own input first, so "back" needs no configuration
@@ -147,6 +164,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     std::thread::Builder::new().name("input-hook".into()).spawn(win::hook::run).unwrap();
     rt.spawn(server());
     rt.spawn(discovery());
+    std::thread::spawn(maintenance);
     std::thread::spawn(|| {
         let p = ddc::probe();
         status::update(|s| {
@@ -159,6 +177,25 @@ pub fn start(rt: &tokio::runtime::Handle) {
         });
     });
     publish();
+}
+
+/// Every 2 s while the PC has control: pick up monitor layout changes (resolution, a monitor
+/// unplugged by a DDC switch) and forget keys whose release the hook never saw.
+fn maintenance() {
+    loop {
+        std::thread::sleep(Duration::from_secs(2));
+        if primary().state != State::Local {
+            continue;
+        }
+        let cfg = primary_config();
+        let mut p = primary();
+        if p.state == State::Local {
+            if cfg.screen != p.cfg.screen || cfg.monitors != p.cfg.monitors {
+                p.set_config(cfg);
+            }
+            p.prune(win::key_down, win::button_down);
+        }
+    }
 }
 
 async fn discovery() {
@@ -197,7 +234,8 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
     let (mut tx, mut rx) = secure::accept(s, &key).await.inspect_err(|_| {
         status::update(|s| s.last_error = format!("refused {}: wrong pairing key", addr.ip()));
     })?;
-    let Msg::Hello { version, name, channel } = rx.recv().await? else { return Err("expected hello".into()) };
+    let hello = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.map_err(|_| "no hello")??;
+    let Msg::Hello { version, name, channel } = hello else { return Err("expected hello".into()) };
     tx.send(&Msg::Hello { version: PROTOCOL_VERSION, name: win::hostname(), channel }).await?;
     if version != PROTOCOL_VERSION {
         status::update(|s| s.last_error = format!("{name} runs an incompatible MirrorMagic version"));
@@ -295,17 +333,24 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
 
 // ---------------------------------------------------------------- camera
 
+/// Generation of the current capture; callbacks from an older capture thread are ignored.
+static CAM_GEN: AtomicU64 = AtomicU64::new(0);
+/// Generation of the current camera channel, so an old channel can't clear a newer one's sender.
+static CAM_CHAN: AtomicU64 = AtomicU64::new(0);
+
 fn camera_wanted(on: bool) {
     status::update(|s| s.camera_wanted = on);
     let mut cap = CAPTURE.lock().unwrap();
     if !on {
         *cap = None; // Drop stops the capture thread → camera light off
+        CAM_GEN.fetch_add(1, Ordering::SeqCst);
         return;
     }
     if cap.is_some() {
         return;
     }
     let c = config::get();
+    let gen = CAM_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     *cap = Some(win::camera::start(
         c.camera_width,
         c.camera_height,
@@ -315,7 +360,19 @@ fn camera_wanted(on: bool) {
                 let _ = tx.try_send(jpeg); // drop frames rather than queue latency
             }
         },
-        |on, detail| {
+        move |on, detail| {
+            if CAM_GEN.load(Ordering::SeqCst) != gen {
+                return; // a newer capture owns the status
+            }
+            if !on {
+                // failed or stopped: free the slot so the next request starts afresh
+                std::thread::spawn(move || {
+                    let mut cap = CAPTURE.lock().unwrap();
+                    if CAM_GEN.load(Ordering::SeqCst) == gen {
+                        *cap = None;
+                    }
+                });
+            }
             send(Msg::CameraState { on, detail: detail.clone() });
             status::update(|s| {
                 s.camera_on = on;
@@ -327,6 +384,7 @@ fn camera_wanted(on: bool) {
 
 async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(), secure::Error> {
     let (ftx, mut frx) = mpsc::channel::<Vec<u8>>(2);
+    let me = CAM_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
     *CAM_TX.lock().unwrap() = Some(ftx);
     let r = loop {
         tokio::select! {
@@ -337,6 +395,9 @@ async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Res
             m = rx.recv() => if let Err(e) = m { break Err(e) },
         }
     };
-    *CAM_TX.lock().unwrap() = None;
+    let mut tx = CAM_TX.lock().unwrap();
+    if CAM_CHAN.load(Ordering::SeqCst) == me {
+        *tx = None;
+    }
     r
 }

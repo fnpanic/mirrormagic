@@ -111,6 +111,14 @@ impl ModTracker {
         self.held[i] = down;
         true
     }
+    /// Drops modifiers that the OS says are no longer held.
+    pub fn retain(&mut self, is_down: impl Fn(u16) -> bool) {
+        const SCANS: [u16; 8] = [0x1D, 0xE01D, 0x38, 0xE038, 0x2A, 0x36, 0xE05B, 0xE05C];
+        for (i, s) in SCANS.iter().enumerate() {
+            self.held[i] &= is_down(*s);
+        }
+    }
+
     pub fn mods(&self) -> Mods {
         let h = &self.held;
         Mods { ctrl: h[0] || h[1], alt: h[2] || h[3], shift: h[4] || h[5], win: h[6] || h[7] }
