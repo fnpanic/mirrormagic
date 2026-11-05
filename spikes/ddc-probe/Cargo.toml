@@ -1,0 +1,8 @@
+[package]
+name = "ddc-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+ddc-hi = "0.4"

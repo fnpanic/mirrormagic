@@ -1,0 +1,137 @@
+//! Wire messages. Encoded with postcard and carried inside the Noise channel (secure.rs).
+use serde::{Deserialize, Serialize};
+
+/// Bumped on incompatible changes; peers with a different version refuse the session.
+pub const PROTOCOL_VERSION: u32 = 1;
+pub const DEFAULT_PORT: u16 = 24850;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Channel {
+    /// Input, control, clipboard. Small messages, latency critical.
+    Control,
+    /// Camera frames. Kept on its own TCP connection so frames never delay input.
+    Camera,
+}
+
+/// Where input goes while the Mac has control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mode {
+    /// The cursor crossed the screen edge onto the Mac's own (built-in) display.
+    Edge,
+    /// The shared monitor shows the Mac (HDMI); the cursor lives on that display.
+    Monitor,
+}
+
+/// Side of a screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Side {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Side {
+    pub fn opposite(self) -> Side {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+            Side::Top => Side::Bottom,
+            Side::Bottom => Side::Top,
+        }
+    }
+    pub fn is_horizontal(self) -> bool {
+        matches!(self, Side::Left | Side::Right)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Button {
+    Left,
+    Right,
+    Middle,
+    Back,
+    Forward,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DisplayInfo {
+    pub name: String,
+    pub builtin: bool,
+    /// Global coordinates in points (macOS) or pixels (Windows).
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Msg {
+    /// First message on every channel, both directions.
+    Hello { version: u32, name: String, channel: Channel },
+    /// Mac → PC: its displays and permission state, for the PC's UI.
+    PeerInfo { displays: Vec<DisplayInfo>, can_inject: bool },
+    /// PC → Mac: take control. `along` is the 0..1 position along the shared edge (Edge mode).
+    /// `side` is the Mac's side that faces the PC (where the cursor appears).
+    Enter { mode: Mode, side: Side, along: f32 },
+    /// Mac → PC: the cursor was pushed back across the edge at `along`.
+    Leave { along: f32 },
+    /// PC → Mac: control returned to the PC (e.g. hotkey, disconnect, emergency key).
+    Exit,
+    Motion { dx: i32, dy: i32 },
+    Button { button: Button, down: bool },
+    /// Windows wheel units (120 per notch). Positive dy = away from the user.
+    Wheel { dx: i32, dy: i32 },
+    /// PC keyboard scan code (set 1, 0xE0xx for extended keys).
+    Key { scan: u16, down: bool },
+    /// Release every key and button the Mac thinks is held.
+    ReleaseAll,
+    /// PC → Mac: set the monitor's input source (VCP 0x60) over the Mac's cable.
+    Ddc { value: u16 },
+    /// Mac → PC: result of a Ddc request.
+    DdcResult { ok: bool, detail: String },
+    Clipboard { text: String },
+    /// Mac → PC: an app on the Mac wants the camera (true) or released it (false).
+    CameraWanted { on: bool },
+    /// PC → Mac: camera state.
+    CameraState { on: bool, detail: String },
+    /// Camera channel only: one JPEG frame.
+    Frame { jpeg: Vec<u8> },
+    Ping { t: u64 },
+    Pong { t: u64 },
+}
+
+pub fn encode(msg: &Msg) -> Vec<u8> {
+    postcard::to_stdvec(msg).expect("postcard encoding of an owned enum cannot fail")
+}
+
+pub fn decode(bytes: &[u8]) -> Result<Msg, postcard::Error> {
+    postcard::from_bytes(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_all_shapes() {
+        let msgs = vec![
+            Msg::Hello { version: PROTOCOL_VERSION, name: "GameMachine".into(), channel: Channel::Control },
+            Msg::Enter { mode: Mode::Monitor, side: Side::Right, along: 0.25 },
+            Msg::Motion { dx: -3, dy: 7 },
+            Msg::Key { scan: 0xE01D, down: true },
+            Msg::Wheel { dx: 0, dy: -120 },
+            Msg::Frame { jpeg: vec![0xFF, 0xD8, 1, 2, 3] },
+            Msg::Clipboard { text: "grüße ✓".into() },
+        ];
+        for m in msgs {
+            assert_eq!(decode(&encode(&m)).unwrap(), m);
+        }
+    }
+
+    #[test]
+    fn motion_is_tiny() {
+        // Input latency: a mouse move should stay a handful of bytes on the wire.
+        assert!(encode(&Msg::Motion { dx: 5, dy: -5 }).len() <= 4);
+    }
+}

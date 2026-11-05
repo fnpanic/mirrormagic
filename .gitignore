@@ -1,0 +1,7 @@
+target/
+node_modules/
+app/dist/
+dist/*/
+!dist/README.md
+*.log
+spikes/*/target/

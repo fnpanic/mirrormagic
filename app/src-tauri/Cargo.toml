@@ -1,0 +1,40 @@
+[package]
+name = "mirrormagic"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MirrorMagic: share the PC's keyboard, mouse, monitor and camera with a Mac"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+mm-core = { path = "../../crates/mm-core" }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+arboard = { version = "3", default-features = false }
+ddc-hi = "0.4"
+log = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+nokhwa = { version = "0.10", default-features = false, features = ["input-msmf"] }
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = { version = "0.24", features = ["highsierra"] }
+core-foundation = "0.10"
+tokio-tungstenite = "0.26"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
