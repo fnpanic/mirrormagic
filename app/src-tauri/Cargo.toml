@@ -20,6 +20,7 @@ arboard = "3" # default features: images
 png = "0.17"
 ddc-hi = "0.4"
 log = "0.4"
+cpal = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 nokhwa = { version = "0.10", default-features = false, features = ["input-msmf"] }

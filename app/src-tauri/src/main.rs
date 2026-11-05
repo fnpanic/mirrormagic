@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! MirrorMagic: the Windows PC shares keyboard, mouse, monitor and camera with a Mac.
 
+mod audio;
 mod clipboard;
 mod commands;
 mod config;

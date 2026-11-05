@@ -34,6 +34,8 @@ pub struct Config {
     pub camera_auto: bool,
     /// Mac: Ctrl acts as Command (Ctrl+C/V copy and paste like on Windows), Win acts as Control.
     pub ctrl_is_cmd: bool,
+    /// PC: stream the webcam microphone together with the camera.
+    pub mic: bool,
     /// Set while MirrorMagic mirrors the Mac screen for monitor mode (undone at the next start after a crash).
     pub mirrored: bool,
 }
@@ -58,6 +60,7 @@ impl Default for Config {
             obs_password: String::new(),
             camera_auto: true,
             ctrl_is_cmd: true,
+            mic: true,
             mirrored: false,
         }
     }

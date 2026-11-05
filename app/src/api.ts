@@ -20,6 +20,7 @@ export interface Config {
   obs_password: string;
   camera_auto: boolean;
   ctrl_is_cmd: boolean;
+  mic: boolean;
 }
 export interface DisplayInfo { name: string; builtin: boolean; x: number; y: number; w: number; h: number }
 export interface Status {
@@ -33,6 +34,7 @@ export interface Status {
   camera_on: boolean;
   camera_detail: string;
   camera_wanted: boolean;
+  mic_detail: string;
   can_inject: boolean;
   displays: DisplayInfo[];
   obs: { installed: boolean; running: boolean; virtualcam: boolean; detail: string };

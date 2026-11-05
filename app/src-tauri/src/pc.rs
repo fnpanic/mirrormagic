@@ -337,9 +337,36 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
 static CAM_GEN: AtomicU64 = AtomicU64::new(0);
 /// Generation of the current camera channel, so an old channel can't clear a newer one's sender.
 static CAM_CHAN: AtomicU64 = AtomicU64::new(0);
+static AUD_TX: Mutex<Option<mpsc::Sender<Msg>>> = Mutex::new(None);
+/// Stops the running microphone capture.
+static MIC_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = Mutex::new(None);
+
+/// The PC microphone streams together with the camera (an app on the Mac opened it).
+fn mic_wanted(on: bool) {
+    let mut m = MIC_STOP.lock().unwrap();
+    if let Some(stop) = m.take() {
+        stop.store(true, Ordering::SeqCst);
+    }
+    if !on || !config::get().mic {
+        return;
+    }
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    *m = Some(stop.clone());
+    std::thread::spawn(move || {
+        let r = crate::audio::capture(stop, |rate, pcm| {
+            if let Some(tx) = AUD_TX.lock().unwrap().as_ref() {
+                let _ = tx.try_send(Msg::Audio { rate, pcm });
+            }
+        });
+        status::log(format!("microphone: {r:?}"));
+        status::update(|s| s.mic_detail = r.unwrap_or_else(|e| format!("microphone failed: {e}")));
+    });
+}
 
 fn camera_wanted(on: bool) {
     status::update(|s| s.camera_wanted = on);
+    status::log(format!("camera wanted: {on}"));
+    mic_wanted(on);
     let mut cap = CAPTURE.lock().unwrap();
     if !on {
         *cap = None; // Drop stops the capture thread → camera light off
@@ -384,10 +411,14 @@ fn camera_wanted(on: bool) {
 
 async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(), secure::Error> {
     let (ftx, mut frx) = mpsc::channel::<Vec<u8>>(2);
+    let (atx, mut arx) = mpsc::channel::<Msg>(64);
     let me = CAM_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
     *CAM_TX.lock().unwrap() = Some(ftx);
+    *AUD_TX.lock().unwrap() = Some(atx);
     let r = loop {
         tokio::select! {
+            biased; // audio first: 10 ms chunks must not wait behind video frames
+            a = arx.recv() => if let Some(m) = a { if let Err(e) = tx.send(&m).await { break Err(e) } },
             f = frx.recv() => match f {
                 Some(jpeg) => if let Err(e) = tx.send(&Msg::Frame { jpeg }).await { break Err(e) },
                 None => break Ok(()),
@@ -398,6 +429,7 @@ async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Res
     let mut tx = CAM_TX.lock().unwrap();
     if CAM_CHAN.load(Ordering::SeqCst) == me {
         *tx = None;
+        *AUD_TX.lock().unwrap() = None;
     }
     r
 }

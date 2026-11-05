@@ -99,6 +99,8 @@ pub enum Msg {
     CameraState { on: bool, detail: String },
     /// Camera channel only: one JPEG frame.
     Frame { jpeg: Vec<u8> },
+    /// Camera channel only: 10 ms of the PC microphone, mono 16-bit at `rate` Hz.
+    Audio { rate: u32, pcm: Vec<i16> },
     Ping { t: u64 },
     Pong { t: u64 },
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 — 2026-11-05
+
+- **PC microphone on the Mac.** The webcam's microphone streams together with the camera (10 ms chunks, sent ahead of video on the camera connection). On the Mac it plays into the **BlackHole 2ch** virtual audio device; pick "BlackHole 2ch" as the microphone in your app. On the PC you can turn this off under Camera → Microphone.
+- OBS sets itself up when an app opens the camera. If OBS runs without remote control, MirrorMagic restarts it once with remote control enabled, so you no longer have to quit OBS and press Set up.
+- Diagnostic log `MirrorMagic.log` (next to config.json) covering camera, OBS, microphone, clipboard and mirroring.
+
 ## 0.2.0 — 2026-11-05
 
 - Monitor mode shows the Mac's **main screen**. While it is on, the shared monitor is the master of a mirror set at its full native resolution (no letterboxing) and the MacBook screen mirrors it; leaving monitor mode restores the extended layout. A crash during monitor mode is undone at the next start.

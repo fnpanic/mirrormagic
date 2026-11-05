@@ -165,6 +165,32 @@ pub async fn ensure(stream_url: &str, start_obs: bool) -> Result<String, String>
         return Err("OBS is not installed (get it from obsproject.com)".into());
     }
     let mut password = crate::config::get().obs_password;
+    // OBS running without (our) remote control, e.g. started by hand: restart it once with
+    // remote control enabled instead of asking the user to do that
+    if running() && start_obs && !password.is_empty() {
+        let mut reachable = false;
+        for _ in 0..6 {
+            if Client::connect(&password).await.is_ok() {
+                reachable = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        if !reachable {
+            crate::status::log("obs: remote control unreachable, restarting OBS");
+            let _ = std::process::Command::new("osascript").args(["-e", "quit app \"OBS\""]).status();
+            for _ in 0..30 {
+                if !running() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            if running() {
+                let _ = std::process::Command::new("pkill").args(["-x", "OBS"]).status();
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
     if !running() {
         if !start_obs {
             return Err("OBS is not running".into());

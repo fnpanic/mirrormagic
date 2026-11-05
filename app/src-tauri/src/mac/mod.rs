@@ -87,6 +87,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     let _ = FRAMES.set(ftx);
     rt.spawn(mjpeg::serve(frx));
     rt.spawn(client_loop());
+    status::log(format!("start: cameras {:?}", sys::cameras()));
     std::thread::spawn(camera_watch);
     if !c.obs_password.is_empty() && c.camera_auto {
         rt.spawn(async { setup_obs(true).await });
@@ -108,6 +109,7 @@ fn obs_status(detail: String) {
 
 pub async fn setup_obs(start: bool) -> Result<String, String> {
     let r = obs::ensure(mjpeg::URL, start).await;
+    status::log(format!("obs setup: {r:?}"));
     let ok = r.is_ok();
     status::update(|s| s.obs.virtualcam = ok);
     obs_status(match &r {
@@ -340,10 +342,15 @@ fn camera_watch() {
         // keep streaming 10 s after the last user, so call apps that re-open the camera don't flicker
         let want = CAM_MANUAL.load(Ordering::SeqCst) || last_use.is_some_and(|t| t.elapsed() < Duration::from_secs(10));
         if want != CAM_WANTED.swap(want, Ordering::SeqCst) {
+            status::log(format!("camera wanted: {want} (devices: {:?})", sys::cameras()));
             status::update(|s| s.camera_wanted = want);
             send(Msg::CameraWanted { on: want });
             if want {
                 task = Some(RT.get().unwrap().spawn(camera_stream()));
+                if !status::get().obs.virtualcam {
+                    // an app opened the camera: make sure OBS shows the PC camera
+                    RT.get().unwrap().spawn(async { setup_obs(true).await });
+                }
             } else if let Some(t) = task.take() {
                 t.abort();
                 let _ = FRAMES.get().unwrap().send(None);
@@ -354,11 +361,52 @@ fn camera_watch() {
 
 async fn camera_stream() {
     while CAM_WANTED.load(Ordering::SeqCst) {
-        if let Ok((_tx, mut rx, _, _)) = open(Channel::Camera).await {
-            // a dead connection (PC asleep, Wi-Fi roam) must not freeze OBS on the last frame
-            while let Ok(Ok(Msg::Frame { jpeg })) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
-                let _ = FRAMES.get().unwrap().send(Some(Arc::new(jpeg)));
+        match open(Channel::Camera).await {
+            Ok((_tx, mut rx, _, _)) => {
+                status::log("camera stream: connected");
+                let (mut frames, mut speaker) = (0u64, None::<(u32, Arc<AtomicBool>, Arc<Mutex<std::collections::VecDeque<i16>>>)>);
+                // a dead connection (PC asleep, Wi-Fi roam) must not freeze OBS on the last frame
+                while let Ok(Ok(m)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
+                    match m {
+                        Msg::Frame { jpeg } => {
+                            frames += 1;
+                            if frames == 1 || frames % 300 == 0 {
+                                status::log(format!("camera stream: {frames} frames"));
+                            }
+                            let _ = FRAMES.get().unwrap().send(Some(Arc::new(jpeg)));
+                        }
+                        Msg::Audio { rate, pcm } => {
+                            if speaker.as_ref().map(|s| s.0) != Some(rate) {
+                                if let Some((_, stop, _)) = speaker.take() {
+                                    stop.store(true, Ordering::SeqCst);
+                                }
+                                let stop = Arc::new(AtomicBool::new(false));
+                                match tokio::task::spawn_blocking({ let s = stop.clone(); move || crate::audio::play("BlackHole", rate, s) }).await {
+                                    Ok(Ok(q)) => {
+                                        status::update(|s| s.mic_detail = "PC microphone → BlackHole 2ch".into());
+                                        speaker = Some((rate, stop, q));
+                                    }
+                                    r => {
+                                        let e = format!("PC microphone: {:?}", r.map(|x| x.err()));
+                                        status::log(&e);
+                                        status::update(|s| s.mic_detail = "Install BlackHole 2ch to use the PC microphone".into());
+                                        speaker = Some((rate, stop, Arc::new(Mutex::new(Default::default())))); // don't retry every 10 ms
+                                    }
+                                }
+                            }
+                            if let Some((_, _, q)) = &speaker {
+                                q.lock().unwrap().extend(pcm);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some((_, stop, _)) = speaker {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                status::log(format!("camera stream: ended after {frames} frames"));
             }
+            Err(e) => status::log(format!("camera stream: {e}")),
         }
         let _ = FRAMES.get().unwrap().send(None);
         tokio::time::sleep(Duration::from_secs(1)).await;
