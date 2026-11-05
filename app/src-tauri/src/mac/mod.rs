@@ -85,7 +85,6 @@ pub fn start(rt: &tokio::runtime::Handle) {
     let _ = FRAMES.set(ftx);
     rt.spawn(mjpeg::serve(frx));
     rt.spawn(client_loop());
-    clipboard::watch(|text| send(Msg::Clipboard { text }));
     std::thread::spawn(camera_watch);
     if !c.obs_password.is_empty() && c.camera_auto {
         rt.spawn(async { setup_obs(true).await });
@@ -243,6 +242,8 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                 Some(Effect::MoveTo { x, y, dx, dy }) => inj().move_to(x, y, dx, dy),
                 Some(Effect::Leave { along }) => {
                     inj().release_all();
+                    let tx = utx.clone();
+                    clipboard::hand_over(move |m| drop(tx.send(m)));
                     let _ = utx.send(Msg::Leave { along });
                     set_control("local");
                 }
@@ -253,6 +254,10 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
         Msg::Wheel { dx, dy } => inj().wheel(dx, dy),
         Msg::Key { scan, down } => inj().key(scan, down),
         Msg::Exit => {
+            if sec().is_active() {
+                let tx = utx.clone();
+                clipboard::hand_over(move |m| drop(tx.send(m))); // hotkey back to the PC
+            }
             sec().exit();
             inj().release_all();
             set_control("local");
@@ -265,7 +270,9 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                 let _ = utx.send(Msg::DdcResult { ok: r.is_ok(), detail: r.unwrap_or_else(|e| e) });
             });
         }
-        Msg::Clipboard { text } => clipboard::set_from_peer(text),
+        Msg::Clipboard { text, html, png } => {
+            std::thread::spawn(move || clipboard::receive(text, html, png));
+        }
         Msg::CameraState { on, detail } => status::update(|s| {
             s.camera_on = on;
             s.camera_detail = detail;

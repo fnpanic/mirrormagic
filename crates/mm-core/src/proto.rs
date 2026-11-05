@@ -90,7 +90,9 @@ pub enum Msg {
     Ddc { value: u16 },
     /// Mac → PC: result of a Ddc request.
     DdcResult { ok: bool, detail: String },
-    Clipboard { text: String },
+    /// Clipboard hand-over on every switch (like a hardware KVM): plain text, HTML (formatted
+    /// text) and/or an image as PNG. Sent by the side that is giving up control.
+    Clipboard { text: Option<String>, html: Option<String>, png: Option<Vec<u8>> },
     /// Mac → PC: an app on the Mac wants the camera (true) or released it (false).
     CameraWanted { on: bool },
     /// PC → Mac: camera state.
@@ -122,7 +124,7 @@ mod tests {
             Msg::Key { scan: 0xE01D, down: true },
             Msg::Wheel { dx: 0, dy: -120 },
             Msg::Frame { jpeg: vec![0xFF, 0xD8, 1, 2, 3] },
-            Msg::Clipboard { text: "grüße ✓".into() },
+            Msg::Clipboard { text: Some("grüße ✓".into()), html: Some("<b>grüße</b>".into()), png: Some(vec![0x89, b'P']) },
         ];
         for m in msgs {
             assert_eq!(decode(&encode(&m)).unwrap(), m);

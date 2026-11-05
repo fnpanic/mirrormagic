@@ -44,7 +44,12 @@ pub fn reload_config() {
 fn run(out: Out) -> bool {
     for a in out.actions {
         match a {
-            Action::Send(m) => send(m.to_msg()),
+            Action::Send(m) => {
+                if matches!(m, mm_core::primary::Msg2::Enter { .. }) {
+                    clipboard::hand_over(send); // the clipboard travels with the pointer
+                }
+                send(m.to_msg())
+            }
             Action::Warp(x, y) => win::warp(x, y),
             Action::HideCursor(h) => {
                 std::thread::spawn(move || win::hide_cursor(h));
@@ -143,7 +148,6 @@ pub fn start(rt: &tokio::runtime::Handle) {
     std::thread::Builder::new().name("input-hook".into()).spawn(win::hook::run).unwrap();
     rt.spawn(server());
     rt.spawn(discovery());
-    clipboard::watch(|text| send(Msg::Clipboard { text }));
     std::thread::spawn(|| {
         let p = ddc::probe();
         status::update(|s| {
@@ -251,7 +255,9 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
                     s.can_inject = can_inject;
                 }),
                 Msg::DdcResult { ok, detail } => status::update(|s| s.ddc.last = if ok { format!("Mac: {detail}") } else { format!("Mac could not switch: {detail}") }),
-                Msg::Clipboard { text } => clipboard::set_from_peer(text),
+                Msg::Clipboard { text, html, png } => {
+                    std::thread::spawn(move || clipboard::receive(text, html, png));
+                }
                 Msg::CameraWanted { on } => camera_wanted(on),
                 Msg::Ping { t } => {
                     let _ = utx.send(Msg::Pong { t });

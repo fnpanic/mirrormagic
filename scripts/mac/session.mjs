@@ -7,6 +7,7 @@
 //   node session.mjs paste <text|@file>          paste text via clipboard sync (layout-safe), Windows clipboard restored
 //   node session.mjs put <local> <remote>        upload a file   (needs a --file-transfer session)
 //   node session.mjs get <remote> <local>        download a file (needs a --file-transfer session)
+// Git Bash: run with MSYS_NO_PATHCONV=1 or /Users/... paths get rewritten into Windows paths.
 // Env: TETHER_EXE, MAC_ID (default 128974683), password from C:\vms\mac.pw (never printed).
 import { createRequire } from "module";
 import { execFileSync } from "node:child_process";
@@ -22,6 +23,13 @@ const EXE = process.env.TETHER_EXE || "C:\\Program Files\\Tether\\tether.exe";
 const MAC_ID = process.env.MAC_ID || "128974683";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ps = (cmd) => execFileSync("powershell", ["-NoProfile", "-Command", cmd]).toString();
+// the clipboard can be briefly locked by other apps (e.g. Tether clipboard sync): retry
+async function setClip(file) {
+  for (let i = 0; ; i++) {
+    try { return ps(`Set-Clipboard -Value (Get-Content -Raw -LiteralPath '${file}')`); }
+    catch (e) { if (i >= 20) throw e; await sleep(150); }
+  }
+}
 
 async function page() {
   for (let i = 0; i < 200; i++) {
@@ -90,16 +98,29 @@ if (cmd === "start") {
   const saved = ps("Get-Clipboard -Raw");
   const [b, p, key] = await page();
   try {
-    ps(`Set-Clipboard -Value (Get-Content -Raw -LiteralPath '${tmp}')`);
+    await setClip(tmp);
     await sleep(1200); // clipboard sync to the Mac
     await combo(p, key, "MetaLeft+KeyV");
   } finally {
     await sleep(500);
     fs.writeFileSync(tmp, saved ?? "");
-    ps(`Set-Clipboard -Value (Get-Content -Raw -LiteralPath '${tmp}')`);
+    await setClip(tmp);
     fs.rmSync(tmp, { force: true });
     await b.close();
   }
+} else if (cmd === "ls" || cmd === "mkdir") {
+  const [b, p, key] = await page();
+  const r = await p.evaluate(async ([k, path, op]) => {
+    const T = window.__TAURI_INTERNALS__; const evs = [];
+    const h = await T.invoke("plugin:event|listen", { event: "session", target: { kind: "Any" }, handler: T.transformCallback((e) => evs.push(e.payload)) });
+    const res = op === "ls" ? await T.invoke("fs_remote_dir", { key: k, path, hidden: false }).then(() => "ok", (e) => "ERR " + e)
+      : await T.invoke("fs_create_dir", { key: k, id: 30000 + Math.floor(Math.random() * 999), path, isRemote: true }).then(() => "ok", (e) => "ERR " + e);
+    await new Promise((s) => setTimeout(s, 2500));
+    await T.invoke("plugin:event|unlisten", { event: "session", eventId: h }).catch(() => {});
+    return res + " " + JSON.stringify(evs.filter((e) => e && e.name !== "update_quality_status")).slice(0, 3000);
+  }, [key, args[0], cmd]);
+  console.log(r);
+  await b.close();
 } else if (cmd === "put" || cmd === "get") {
   const [b, p, key] = await page();
   // fs_transfer: path = source, to = destination, isRemote = source is on the Mac

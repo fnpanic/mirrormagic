@@ -16,7 +16,8 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-arboard = { version = "3", default-features = false }
+arboard = "3" # default features: images
+png = "0.17"
 ddc-hi = "0.4"
 log = "0.4"
 
