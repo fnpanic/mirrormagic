@@ -20,6 +20,9 @@ mod win;
 use tauri::WindowEvent;
 
 fn main() {
+    // release builds have no console: record panics where we can read them
+    std::panic::set_hook(Box::new(|info| status::log(format!("PANIC {info}"))));
+    status::log(format!("start v{}", env!("CARGO_PKG_VERSION")));
     // networking/camera runtime, independent of Tauri's own
     let rt: &'static tokio::runtime::Runtime = Box::leak(Box::new(tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().thread_name("mm-net").build().expect("tokio runtime")));
     let hidden = std::env::args().any(|a| a == "--hidden");

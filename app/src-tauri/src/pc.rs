@@ -38,6 +38,7 @@ fn primary_config() -> PrimaryConfig {
 
 pub fn reload_config() {
     let cfg = primary_config();
+    status::log(format!("config reloaded: hotkey {:?}", cfg.monitor_hotkey.map(|h| h.format())));
     primary().set_config(cfg);
 }
 
@@ -87,7 +88,17 @@ fn publish() {
 // ---------------------------------------------------------------- hook entry points (hook thread)
 
 pub fn on_key(scan: u16, down: bool) -> bool {
-    let out = primary().key(scan, down);
+    let (out, diag) = {
+        let mut p = primary();
+        let m = p.mods();
+        // diagnostics for hotkey trouble: only Ctrl+Alt combinations are logged, never normal typing
+        let diag = (down && m.ctrl && m.alt && !matches!(scan, 0x1D | 0xE01D | 0x38 | 0xE038 | 0x21D))
+            .then(|| format!("hotkey check: Ctrl+Alt+scan 0x{scan:X}, configured {:?}", p.cfg.monitor_hotkey.map(|h| h.format())));
+        (p.key(scan, down), diag)
+    };
+    if let Some(d) = diag {
+        std::thread::spawn(move || status::log(d));
+    }
     run(out)
 }
 pub fn on_move(x: f64, y: f64) -> bool {

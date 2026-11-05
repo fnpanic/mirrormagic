@@ -319,6 +319,11 @@ impl Primary {
 
     /// The OS put the parked cursor somewhere else than asked (clamped to a monitor that just
     /// disappeared, layout change): deltas must be measured from where it really is.
+    /// Modifiers currently held on the PC (diagnostics).
+    pub fn mods(&self) -> crate::keymap::Mods {
+        self.mods.mods()
+    }
+
     pub fn set_park(&mut self, x: f64, y: f64) {
         self.park = (x, y);
     }

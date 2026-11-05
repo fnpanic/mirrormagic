@@ -8,6 +8,15 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC, VK_PAUSE};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+/// A panic must never unwind out of a hook callback: Rust would abort the whole app without a
+/// trace. Log it and let the event through instead.
+fn guarded(f: impl FnOnce() -> bool) -> bool {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|_| {
+        crate::status::log("input hook: recovered from a panic (event passed through)");
+        false
+    })
+}
+
 unsafe extern "system" fn keyboard_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let k = &*(l as *const KBDLLHOOKSTRUCT);
@@ -20,7 +29,7 @@ unsafe extern "system" fn keyboard_proc(code: i32, w: WPARAM, l: LPARAM) -> LRES
                 // Right Shift and Num Lock report the extended bit but have their own codes
                 scan |= 0xE000;
             }
-            if crate::pc::on_key(scan, down) {
+            if guarded(|| crate::pc::on_key(scan, down)) {
                 return 1;
             }
         }
@@ -33,7 +42,7 @@ unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
         let m = &*(l as *const MSLLHOOKSTRUCT);
         if m.flags & LLMHF_INJECTED == 0 {
             let hi = (m.mouseData >> 16) as u16;
-            let block = match w as u32 {
+            let block = guarded(|| match w as u32 {
                 WM_MOUSEMOVE => crate::pc::on_move(m.pt.x as f64, m.pt.y as f64),
                 WM_LBUTTONDOWN => crate::pc::on_button(Button::Left, true),
                 WM_LBUTTONUP => crate::pc::on_button(Button::Left, false),
@@ -48,7 +57,7 @@ unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
                 WM_MOUSEWHEEL => crate::pc::on_wheel(0, hi as i16 as i32),
                 WM_MOUSEHWHEEL => crate::pc::on_wheel(hi as i16 as i32, 0),
                 _ => false,
-            };
+            });
             if block {
                 return 1;
             }
