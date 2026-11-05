@@ -116,7 +116,7 @@ const field = "h-9 rounded-md border border-hairline bg-canvas px-3 text-caption
 function Shared({ snap, save }: ViewProps) {
   return (
     <Card icon={<RefreshCw size={18} />} title="General">
-      <Row label="Share the clipboard" hint="Text, formatted text and images travel with the pointer when you switch">
+      <Row label="Share the clipboard" hint={snap.status.clipboard ? `Last switch: ${snap.status.clipboard}` : "Text, formatted text and images travel with the pointer when you switch"}>
         <Toggle label="Share the clipboard" on={snap.config.clipboard} onChange={(v) => save({ clipboard: v })} />
       </Row>
       <Row label={snap.role === "pc" ? "Start with Windows" : "Start at login"} hint="Runs quietly in the tray">
@@ -309,6 +309,9 @@ function MacView(p: ViewProps) {
         </Row>
         <Row label="Natural scrolling" hint="Reverse the PC mouse wheel">
           <Toggle label="Natural scrolling" on={c.invert_scroll} onChange={(v) => save({ invert_scroll: v })} />
+        </Row>
+        <Row label="Ctrl works as ⌘" hint="Ctrl+C, Ctrl+V … like on Windows; the Win key becomes Control">
+          <Toggle label="Ctrl works as Command" on={c.ctrl_is_cmd} onChange={(v) => save({ ctrl_is_cmd: v })} />
         </Row>
         <Row label="German AltGr keys" hint="AltGr+Q types @, AltGr+8 types [ … like on the PC">
           <select className={field} value={c.german_fixups === null ? "auto" : c.german_fixups ? "on" : "off"}

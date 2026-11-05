@@ -155,6 +155,10 @@ impl Injector {
         }
     }
 
+    pub fn set_ctrl_is_cmd(&mut self, on: bool) {
+        self.keys.ctrl_is_cmd = on;
+    }
+
     pub fn set_layout(&mut self, iso: bool, german: bool) {
         self.keys.iso = iso;
         self.keys.german = german;

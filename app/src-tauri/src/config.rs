@@ -32,6 +32,10 @@ pub struct Config {
     pub german_fixups: Option<bool>,
     pub obs_password: String,
     pub camera_auto: bool,
+    /// Mac: Ctrl acts as Command (Ctrl+C/V copy and paste like on Windows), Win acts as Control.
+    pub ctrl_is_cmd: bool,
+    /// Set while MirrorMagic mirrors the Mac screen for monitor mode (undone at the next start after a crash).
+    pub mirrored: bool,
 }
 
 impl Default for Config {
@@ -53,6 +57,8 @@ impl Default for Config {
             german_fixups: None,
             obs_password: String::new(),
             camera_auto: true,
+            ctrl_is_cmd: true,
+            mirrored: false,
         }
     }
 }

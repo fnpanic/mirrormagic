@@ -86,12 +86,30 @@ fn take() -> Option<Msg> {
     Some(Msg::Clipboard { text, html, png })
 }
 
+/// "text (12 chars), formatting, image" for the status line.
+fn describe(m: &Msg) -> String {
+    let Msg::Clipboard { text, html, png } = m else { return String::new() };
+    let mut parts = vec![];
+    if let Some(t) = text {
+        parts.push(format!("text ({} chars)", t.chars().count()));
+    }
+    if html.is_some() {
+        parts.push("formatting".into());
+    }
+    if let Some(p) = png {
+        parts.push(format!("image ({} KB)", p.len() / 1024));
+    }
+    parts.join(", ")
+}
+
 /// Called when control leaves this machine. Reads off the input thread and sends via `send`.
 pub fn hand_over(send: impl FnOnce(Msg) + Send + 'static) {
     std::thread::spawn(move || {
         let _g = BUSY.lock().unwrap();
         if let Some(m) = take() {
+            let what = describe(&m);
             send(m);
+            crate::status::update(|s| s.clipboard = format!("sent {what}"));
         }
     });
 }
@@ -101,6 +119,9 @@ pub fn receive(text: Option<String>, html: Option<String>, png: Option<Vec<u8>>)
     if !crate::config::get().clipboard {
         return;
     }
+    let what = describe(&Msg::Clipboard { text: text.clone(), html: None, png: None });
+    let what = format!("{what}{}{}", if html.is_some() { " +formatting" } else { "" }, if png.is_some() { " +image" } else { "" });
+    crate::status::update(|s| s.clipboard = format!("received {what}"));
     let _g = BUSY.lock().unwrap();
     let Ok(mut cb) = arboard::Clipboard::new() else { return };
     let image = png.as_deref().and_then(decode_png);

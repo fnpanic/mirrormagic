@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 — 2026-11-05
+
+- Monitor mode shows the Mac's **main screen**. While it is on, the built-in screen is mirrored onto the shared monitor; leaving monitor mode restores the extended layout. A crash during monitor mode is undone at the next start.
+- **Ctrl works as ⌘** on the Mac (Mac setting, on by default), so Ctrl+C and Ctrl+V copy and paste like on Windows. The Win key becomes Control.
+- The settings show the last clipboard hand-over ("sent text (12 chars), formatting" / "received …").
+- Code-review fixes:
+  - Cursor hide/show runs on one worker.
+  - The park point is re-measured.
+  - Stale key ownership is pruned (Ctrl+Alt+Del, UAC).
+  - Replacement sessions re-enter.
+  - DDC requests are serialized.
+  - The camera is generation-tagged.
+  - Clipboard size is capped.
+  - Hello has a timeout.
+  - The Mac tracks all five mouse buttons.
+  - OBS websocket settings are written to user.ini.
+- Safety: the PC hands over control only once the Mac has Accessibility.
+
 ## 0.1.0 — 2026-11-05
 
 First release.

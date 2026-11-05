@@ -19,6 +19,7 @@ export interface Config {
   german_fixups: boolean | null;
   obs_password: string;
   camera_auto: boolean;
+  ctrl_is_cmd: boolean;
 }
 export interface DisplayInfo { name: string; builtin: boolean; x: number; y: number; w: number; h: number }
 export interface Status {
@@ -36,6 +37,7 @@ export interface Status {
   displays: DisplayInfo[];
   obs: { installed: boolean; running: boolean; virtualcam: boolean; detail: string };
   last_error: string;
+  clipboard: string;
 }
 export interface Snapshot {
   role: "pc" | "mac";

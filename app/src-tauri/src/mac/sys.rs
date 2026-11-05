@@ -30,6 +30,44 @@ pub fn displays() -> Vec<DisplayInfo> {
         .collect()
 }
 
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGGetOnlineDisplayList(max: u32, displays: *mut u32, count: *mut u32) -> i32;
+}
+
+/// All connected displays, including ones currently mirroring another (not in the active list).
+fn online_displays() -> Vec<CGDisplay> {
+    let mut ids = [0u32; 16];
+    let mut n = 0u32;
+    if unsafe { CGGetOnlineDisplayList(16, ids.as_mut_ptr(), &mut n) } != 0 {
+        return vec![];
+    }
+    ids[..n as usize].iter().map(|&id| CGDisplay::new(id)).collect()
+}
+
+/// Monitor mode: `true` mirrors the Mac's main (built-in) screen onto the shared monitor, so the
+/// monitor shows the desktop with your windows instead of an empty extended screen; `false`
+/// restores the extended layout. Session-scoped: a logout restores the user's setting.
+pub fn set_mirror(on: bool) -> Result<(), String> {
+    use core_graphics::display::{CGConfigureOption, CGDisplay as D};
+    let ds = online_displays();
+    let Some(main) = ds.iter().find(|d| d.is_builtin()).or_else(|| ds.first()) else { return Err("no display".into()) };
+    let externals: Vec<&D> = ds.iter().filter(|d| d.id != main.id).collect();
+    if externals.is_empty() {
+        return Err("no external display connected".into());
+    }
+    let cfg = main.begin_configuration().map_err(|e| format!("display config: {e}"))?;
+    let none = D::new(core_graphics::display::kCGNullDirectDisplayID);
+    for d in externals {
+        let r = d.configure_display_mirror_of_display(&cfg, if on { main } else { &none });
+        if let Err(e) = r {
+            let _ = main.cancel_configuration(&cfg);
+            return Err(format!("mirror: {e}"));
+        }
+    }
+    main.complete_configuration(&cfg, CGConfigureOption::ConfigureForSession).map_err(|e| format!("mirror: {e}"))
+}
+
 pub fn rect(d: &DisplayInfo) -> Rect {
     Rect { x: d.x, y: d.y, w: d.w, h: d.h }
 }

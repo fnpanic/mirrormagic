@@ -184,6 +184,8 @@ impl Hotkey {
 pub struct KeyTranslator {
     pub iso: bool,
     pub german: bool,
+    /// Windows habits on the Mac: Ctrl acts as Command (Ctrl+C copies) and the Win key as Control.
+    pub ctrl_is_cmd: bool,
     altgr: bool,
     /// What each held PC key was sent as, so the release matches the press.
     sent: HashMap<u16, Vec<u16>>,
@@ -209,7 +211,7 @@ pub type MacKey = (u16, bool);
 
 impl KeyTranslator {
     pub fn new(iso: bool, german: bool) -> Self {
-        KeyTranslator { iso, german, altgr: false, sent: HashMap::new() }
+        KeyTranslator { iso, german, ctrl_is_cmd: false, altgr: false, sent: HashMap::new() }
     }
 
     pub fn translate(&mut self, scan: u16, down: bool) -> Vec<MacKey> {
@@ -233,6 +235,13 @@ impl KeyTranslator {
             Some((code, true)) => vec![MAC_SHIFT, code],
             Some((code, false)) => vec![code],
             None => match mac_from_scan(scan, self.iso) {
+                Some(c) if self.ctrl_is_cmd => vec![match c {
+                    0x3B => 0x37, // left Ctrl -> left Command
+                    0x3E => 0x36, // right Ctrl -> right Command
+                    0x37 => 0x3B, // left Win (Command) -> left Control
+                    0x36 => 0x3E, // right Win -> right Control
+                    c => c,
+                }],
                 Some(c) => vec![c],
                 None => return vec![],
             },
@@ -352,5 +361,23 @@ mod tests {
         assert_eq!(f.bits(), 0x20000 | 0x2);
         assert!(MacFlags::is_modifier(0x3D));
         assert!(!MacFlags::is_modifier(0x00));
+    }
+}
+
+#[cfg(test)]
+mod ctrl_cmd_tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_c_becomes_command_c_when_swapped() {
+        let mut k = KeyTranslator::new(true, true);
+        k.ctrl_is_cmd = true;
+        assert_eq!(k.translate(0x1D, true), vec![(0x37, true)]); // Ctrl -> Command
+        assert_eq!(k.translate(0x2E, true), vec![(0x08, true)]); // C
+        assert_eq!(k.translate(0x2E, false), vec![(0x08, false)]);
+        assert_eq!(k.translate(0x1D, false), vec![(0x37, false)]);
+        assert_eq!(k.translate(0xE05B, true), vec![(0x3B, true)]); // Win -> Control
+        // AltGr still works: its fake Ctrl is dropped, not turned into Command
+        assert_eq!(k.translate(SCAN_FAKE_CTRL, true), vec![]);
     }
 }

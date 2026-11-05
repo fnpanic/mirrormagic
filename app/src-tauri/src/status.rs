@@ -21,6 +21,8 @@ pub struct Status {
     pub displays: Vec<DisplayInfo>,
     pub obs: ObsStatus,
     pub last_error: String,
+    /// Last clipboard hand-over, e.g. "sent: text, image".
+    pub clipboard: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

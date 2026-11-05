@@ -58,6 +58,7 @@ fn refresh() -> Msg {
         let mut i = inj();
         i.set_layout(sys::keyboard_is_iso(), german(&c));
         i.invert_scroll = c.invert_scroll;
+        i.set_ctrl_is_cmd(c.ctrl_is_cmd);
     }
     let can = sys::can_inject(false);
     status::update(|s| {
@@ -71,6 +72,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     let _ = RT.set(rt.clone());
     T0.get_or_init(Instant::now);
     LAYOUT_GERMAN.store(sys::layout_id().contains("German"), Ordering::Relaxed);
+    mirror(false); // undo a mirror left by a crash during monitor mode
     let c = config::get();
     let ds = sys::displays();
     let (edge, monitor) = sys::layout(&ds).unwrap_or((mm_core::primary::Rect { x: 0.0, y: 0.0, w: 1440.0, h: 900.0 }, None));
@@ -224,7 +226,21 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
     *CTRL_TX.lock().unwrap() = None;
     sec().exit();
     inj().release_all();
+    mirror(false);
     r
+}
+
+/// Monitor mode shows the Mac's main screen: mirror it onto the shared monitor while active.
+fn mirror(on: bool) {
+    if config::get().mirrored == on {
+        return;
+    }
+    match sys::set_mirror(on) {
+        Ok(()) => {
+            config::update(|c| c.mirrored = on);
+        }
+        Err(e) => status::update(|s| s.last_error = format!("could not {} the screen: {e}", if on { "mirror" } else { "unmirror" })),
+    }
 }
 
 fn set_control(c: &str) {
@@ -235,6 +251,7 @@ fn set_control(c: &str) {
 fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
     match m {
         Msg::Enter { mode, side, along } => {
+            mirror(mode == Mode::Monitor);
             let info = refresh(); // displays may have changed (HDMI plugged, lid closed)
             let _ = utx.send(info);
             let (x, y) = sec().enter(mode, side, along);
@@ -266,6 +283,7 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
             }
             sec().exit();
             inj().release_all();
+            mirror(false);
             set_control("local");
         }
         Msg::ReleaseAll => inj().release_all(),
