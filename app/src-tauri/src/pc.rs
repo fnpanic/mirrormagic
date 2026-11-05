@@ -68,11 +68,10 @@ fn publish() {
         State::Remote { mode: Mode::Edge } => "edge",
         State::Remote { mode: Mode::Monitor } => "monitor",
     };
-    let (connected, on_mac) = (p.connected, p.monitor_on_mac);
+    let on_mac = p.monitor_on_mac;
     drop(p);
     status::update(|s| {
         s.control = control.into();
-        s.connected = connected;
         s.monitor_on_mac = on_mac;
     });
 }
@@ -215,12 +214,12 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
     let (utx, mut urx) = mpsc::unbounded_channel::<Msg>();
     *CTRL_TX.lock().unwrap() = Some(utx.clone()); // a newer Mac session replaces an old one
     status::update(|s| {
+        s.connected = true;
         s.peer = name;
         s.peer_addr = addr;
         s.last_error.clear();
     });
-    let out = primary().connected();
-    run(out);
+    // input is handed over only once the Mac reports it can inject (PeerInfo, Accessibility granted)
 
     let writer = tokio::spawn(async move {
         while let Some(m) = urx.recv().await {
@@ -250,10 +249,17 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
                     let out = primary().on_leave(along);
                     run(out);
                 }
-                Msg::PeerInfo { displays, can_inject } => status::update(|s| {
-                    s.displays = displays;
-                    s.can_inject = can_inject;
-                }),
+                Msg::PeerInfo { displays, can_inject } => {
+                    status::update(|s| {
+                        s.displays = displays;
+                        s.can_inject = can_inject;
+                    });
+                    let ready = primary().connected;
+                    if can_inject != ready {
+                        let out = if can_inject { primary().connected() } else { primary().disconnected() };
+                        run(out);
+                    }
+                }
                 Msg::DdcResult { ok, detail } => status::update(|s| s.ddc.last = if ok { format!("Mac: {detail}") } else { format!("Mac could not switch: {detail}") }),
                 Msg::Clipboard { text, html, png } => {
                     std::thread::spawn(move || clipboard::receive(text, html, png));
@@ -279,6 +285,7 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
         run(out);
         camera_wanted(false);
         status::update(|s| {
+            s.connected = false;
             s.rtt_ms = None;
             s.can_inject = false;
         });

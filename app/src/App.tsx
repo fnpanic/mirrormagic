@@ -45,6 +45,7 @@ function Header({ s, role, version }: { s: Status; role: string; version: string
   const peer = s.peer || (role === "pc" ? "the Mac" : "the PC");
   const line = !s.connected
     ? role === "pc" ? "Waiting for the Mac" : "Looking for the PC"
+    : role === "pc" && !s.can_inject ? `${peer} is connected: allow Accessibility on the Mac to control it`
     : s.control === "edge" ? `${role === "pc" ? "Controlling" : "Controlled from"} ${peer}`
     : s.control === "monitor" ? "Monitor mode: the shared monitor shows the Mac"
     : `Connected to ${peer}`;

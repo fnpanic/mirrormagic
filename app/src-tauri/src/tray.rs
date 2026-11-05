@@ -64,6 +64,9 @@ pub fn line(s: &Status) -> String {
         return if cfg!(windows) { "Waiting for the Mac".into() } else { "Looking for the PC".into() };
     }
     let peer = if s.peer.is_empty() { "peer" } else { s.peer.as_str() };
+    if cfg!(windows) && !s.can_inject {
+        return format!("{peer} connected: needs Accessibility");
+    }
     match s.control.as_str() {
         "edge" => format!("Controlling {peer}"),
         "monitor" => format!("Monitor shows {}", if cfg!(windows) { peer } else { "this Mac" }),

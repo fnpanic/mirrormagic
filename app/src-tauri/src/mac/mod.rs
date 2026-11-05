@@ -198,8 +198,14 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
     let pinger = {
         let utx = utx.clone();
         tokio::spawn(async move {
+            let mut could = sys::can_inject(false);
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                let can = sys::can_inject(false);
+                if can != could {
+                    could = can; // Accessibility granted/revoked: tell the PC right away
+                    let _ = utx.send(refresh());
+                }
                 if utx.send(Msg::Ping { t: T0.get().unwrap().elapsed().as_micros() as u64 }).is_err() {
                     break;
                 }
