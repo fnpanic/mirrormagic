@@ -2,7 +2,7 @@
 
 ## 0.2.0 — 2026-11-05
 
-- Monitor mode shows the Mac's **main screen**. While it is on, the built-in screen is mirrored onto the shared monitor; leaving monitor mode restores the extended layout. A crash during monitor mode is undone at the next start.
+- Monitor mode shows the Mac's **main screen**. While it is on, the shared monitor is the master of a mirror set at its full native resolution (no letterboxing) and the MacBook screen mirrors it; leaving monitor mode restores the extended layout. A crash during monitor mode is undone at the next start.
 - **Ctrl works as ⌘** on the Mac (Mac setting, on by default), so Ctrl+C and Ctrl+V copy and paste like on Windows. The Win key becomes Control.
 - The settings show the last clipboard hand-over ("sent text (12 chars), formatting" / "received …").
 - Code-review fixes:

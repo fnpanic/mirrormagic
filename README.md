@@ -5,7 +5,7 @@ Share the Windows PC's keyboard, mouse, monitor, clipboard and webcam with a Mac
 | You do | What happens |
 |---|---|
 | Push the pointer past the configured screen edge | Mouse and keyboard control the Mac (its built-in screen sits next to the monitor). Push it back to return. |
-| Press **Ctrl+Alt+M** | The shared monitor switches to the Mac's HDMI input (DDC/CI) and shows the Mac's **main screen** (mirrored while monitor mode is on). Mouse and keyboard move to the Mac. Press again to switch back. |
+| Press **Ctrl+Alt+M** | The shared monitor switches to the Mac's HDMI input (DDC/CI) and shows the Mac's **main screen** at the monitor's full native resolution (the MacBook screen mirrors the monitor while monitor mode is on). Mouse and keyboard move to the Mac. Press again to switch back. |
 | Switch either way | The clipboard comes with you: text, formatted text (HTML) and images. Clipboard managers on both sides record it. |
 | Open "OBS Virtual Camera" in Teams/Zoom/a browser on the Mac | The PC's webcam turns on and streams to the Mac. It turns off about 10 s after the app closes the camera. |
 | Press **Scroll Lock** | Emergency exit: control returns to the PC at once. |

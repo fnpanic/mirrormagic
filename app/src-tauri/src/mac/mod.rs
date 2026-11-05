@@ -238,6 +238,13 @@ fn mirror(on: bool) {
     match sys::set_mirror(on) {
         Ok(()) => {
             config::update(|c| c.mirrored = on);
+            // macOS applies the new layout asynchronously; wait (max 2 s) so the cursor area is right
+            for _ in 0..20 {
+                if sys::displays().iter().any(|d| d.builtin) != on {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
         Err(e) => status::update(|s| s.last_error = format!("could not {} the screen: {e}", if on { "mirror" } else { "unmirror" })),
     }
