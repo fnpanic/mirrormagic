@@ -59,16 +59,28 @@ unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
 
 /// Installs both hooks and pumps messages on the calling thread (never returns normally).
 pub fn run() {
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL};
     unsafe {
+        // Windows silently drops a low-level hook whose callback is late (e.g. under heavy CPU
+        // load): run at top priority, and re-install both hooks every 2 s so a dropped hook heals.
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
         let module = GetModuleHandleW(std::ptr::null());
-        let kb = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
-        let ms = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0);
+        let install = || (SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0), SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), module, 0));
+        let (mut kb, mut ms) = install();
         if kb.is_null() || ms.is_null() {
             crate::status::update(|s| s.last_error = "could not install the input hooks".into());
             return;
         }
+        SetTimer(null_mut(), 0, 2000, None);
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            if msg.message == WM_TIMER {
+                // unhook first: two live copies would process every event twice
+                UnhookWindowsHookEx(kb);
+                UnhookWindowsHookEx(ms);
+                (kb, ms) = install();
+                continue;
+            }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

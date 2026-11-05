@@ -24,7 +24,7 @@ export default function App() {
     }
   };
 
-  if (!snap) return <div className="p-8 text-muted">Loadingâ¦</div>;
+  if (!snap) return <div className="p-8 text-muted">Loading…</div>;
   const props = { snap, save, reload, setError };
   return (
     <div className="h-full overflow-y-auto">
@@ -57,11 +57,11 @@ function Header({ s, role, version }: { s: Status; role: string; version: string
         <p className="mt-1 flex items-center gap-2 text-callout text-ink-80">
           <span className={`inline-block size-2 rounded-full ${dot}`} />
           {line}
-          {s.connected && s.rtt_ms != null && <span className="text-muted">Â· {s.rtt_ms.toFixed(1)} ms</span>}
+          {s.connected && s.rtt_ms != null && <span className="text-muted">· {s.rtt_ms.toFixed(1)} ms</span>}
         </p>
         {s.last_error && <p className="mt-1 text-footnote text-warn">{s.last_error}</p>}
       </div>
-      <span className="text-footnote text-faint">{role === "pc" ? "PC" : "Mac"} Â· v{version}</span>
+      <span className="text-footnote text-faint">{role === "pc" ? "PC" : "Mac"} · v{version}</span>
     </header>
   );
 }
@@ -178,7 +178,7 @@ function HotkeyField({ value, onSave }: { value: string; onSave: (v: string) => 
           onSave(h);
         }
       }}>
-      {rec ? "Press keysâ¦" : value}
+      {rec ? "Press keys…" : value}
     </button>
   );
 }
@@ -206,7 +206,7 @@ function PcView(p: ViewProps) {
         <Row label="Hotkey" hint="Switches the monitor to the Mac and puts keyboard and mouse there, and back">
           <HotkeyField value={c.monitor_hotkey} onSave={(monitor_hotkey) => save({ monitor_hotkey })} />
         </Row>
-        <Row label="The Mac is connected to" hint={s.ddc.monitor ? `${s.ddc.monitor} Â· the PC uses ${inputName(c.pc_input)}` : s.ddc.last || "Looking for the monitorâ¦"}>
+        <Row label="The Mac is connected to" hint={s.ddc.monitor ? `${s.ddc.monitor} · the PC uses ${inputName(c.pc_input)}` : s.ddc.last || "Looking for the monitor…"}>
           <select className={field} value={c.mac_input} onChange={(e) => save({ mac_input: Number(e.target.value) })}>
             {inputs.filter((i) => i.value !== c.pc_input).map((i) => <option key={i.value} value={i.value}>{i.name}</option>)}
           </select>
@@ -226,12 +226,12 @@ function PcView(p: ViewProps) {
         <Row label="New key" hint="Disconnects Macs that use the old key">
           <Btn onClick={async () => { await api.newPairingKey(); p.reload(); }}>Generate</Btn>
         </Row>
-        {s.connected && <p className="text-footnote text-muted">Connected: {s.peer} ({s.peer_addr}){s.can_inject ? "" : " Â· the Mac has not allowed Accessibility yet"}</p>}
+        {s.connected && <p className="text-footnote text-muted">Connected: {s.peer} ({s.peer_addr}){s.can_inject ? "" : " · the Mac has not allowed Accessibility yet"}</p>}
       </Card>
 
       <Card icon={<Camera size={18} />} title="Camera for the Mac">
-        <Row label="Status" hint={s.camera_detail || "Starts by itself when an app on the Mac opens âOBS Virtual Cameraâ"}>
-          <span className={`text-caption ${s.camera_on ? "text-ok" : "text-muted"}`}>{s.camera_on ? "Streaming" : s.camera_wanted ? "Startingâ¦" : "Idle"}</span>
+        <Row label="Status" hint={s.camera_detail || "Starts by itself when an app on the Mac opens “OBS Virtual Camera”"}>
+          <span className={`text-caption ${s.camera_on ? "text-ok" : "text-muted"}`}>{s.camera_on ? "Streaming" : s.camera_wanted ? "Starting…" : "Idle"}</span>
         </Row>
         <Row label="Microphone" hint={s.mic_detail || "The webcam microphone streams together with the camera"}>
           <Toggle label="Stream the webcam microphone" on={c.mic} onChange={(v) => save({ mic: v })} />
@@ -239,9 +239,9 @@ function PcView(p: ViewProps) {
         <Row label="Resolution">
           <select className={field} value={`${c.camera_width}x${c.camera_height}`}
             onChange={(e) => { const [w, h] = e.target.value.split("x").map(Number); save({ camera_width: w, camera_height: h }); }}>
-            <option value="1280x720">1280 Ã 720</option>
-            <option value="1920x1080">1920 Ã 1080</option>
-            <option value="640x480">640 Ã 480</option>
+            <option value="1280x720">1280 × 720</option>
+            <option value="1920x1080">1920 × 1080</option>
+            <option value="640x480">640 × 480</option>
           </select>
         </Row>
       </Card>
@@ -296,27 +296,27 @@ function MacView(p: ViewProps) {
         {found && (
           <div className="flex flex-wrap gap-2 text-footnote">
             {found.length === 0 ? <span className="text-muted">No PC answered. Is MirrorMagic running on it?</span>
-              : found.map(([ip, name]) => <Btn key={ip} onClick={() => { setHost(ip); save({ host: ip }); setFound(null); }}>{name} Â· {ip}</Btn>)}
+              : found.map(([ip, name]) => <Btn key={ip} onClick={() => { setHost(ip); save({ host: ip }); setFound(null); }}>{name} · {ip}</Btn>)}
           </div>
         )}
       </Card>
 
       <Card icon={<Laptop size={18} />} title="Screens">
         {s.displays.map((d) => (
-          <Row key={`${d.x},${d.y}`} label={d.name} hint={`${Math.round(d.w)} Ã ${Math.round(d.h)} points`}>
+          <Row key={`${d.x},${d.y}`} label={d.name} hint={`${Math.round(d.w)} × ${Math.round(d.h)} points`}>
             <span className="text-footnote text-muted">{d.builtin ? "Next to the PC monitor" : "Shared monitor (monitor mode)"}</span>
           </Row>
         ))}
-        <Row label="Pointer speed" hint={`${c.speed.toFixed(2)}Ã`}>
+        <Row label="Pointer speed" hint={`${c.speed.toFixed(2)}×`}>
           <input type="range" min={0.5} max={2} step={0.05} defaultValue={c.speed} onChange={(e) => save({ speed: Number(e.target.value) })} className="w-[180px] accent-[var(--accent)]" />
         </Row>
         <Row label="Natural scrolling" hint="Reverse the PC mouse wheel">
           <Toggle label="Natural scrolling" on={c.invert_scroll} onChange={(v) => save({ invert_scroll: v })} />
         </Row>
-        <Row label="Ctrl works as â" hint="Ctrl+C, Ctrl+V â¦ like on Windows; the Win key becomes Control">
+        <Row label="Ctrl works as ⌘" hint="Ctrl+C, Ctrl+V … like on Windows; the Win key becomes Control">
           <Toggle label="Ctrl works as Command" on={c.ctrl_is_cmd} onChange={(v) => save({ ctrl_is_cmd: v })} />
         </Row>
-        <Row label="German AltGr keys" hint="AltGr+Q types @, AltGr+8 types [ â¦ like on the PC">
+        <Row label="German AltGr keys" hint="AltGr+Q types @, AltGr+8 types [ … like on the PC">
           <select className={field} value={c.german_fixups === null ? "auto" : c.german_fixups ? "on" : "off"}
             onChange={(e) => save({ german_fixups: e.target.value === "auto" ? null : e.target.value === "on" })}>
             <option value="auto">Automatic</option>
@@ -327,7 +327,7 @@ function MacView(p: ViewProps) {
       </Card>
 
       <Card icon={<Camera size={18} />} title="PC camera"
-        aside={<Btn primary disabled={obsBusy} onClick={async () => { setObsBusy(true); try { await api.setupObs(); } catch (e) { p.setError(String(e)); } setObsBusy(false); }}>{obsBusy ? "Setting upâ¦" : "Set up OBS"}</Btn>}>
+        aside={<Btn primary disabled={obsBusy} onClick={async () => { setObsBusy(true); try { await api.setupObs(); } catch (e) { p.setError(String(e)); } setObsBusy(false); }}>{obsBusy ? "Setting up…" : "Set up OBS"}</Btn>}>
         <p className="text-footnote text-muted">
           Pick <b className="font-semibold text-ink-80">OBS Virtual Camera</b> in Teams, Zoom or the browser. MirrorMagic turns the PC camera on while an app uses it.
         </p>
@@ -337,7 +337,7 @@ function MacView(p: ViewProps) {
         <Row label="Start automatically" hint={s.camera_detail || (s.camera_wanted ? "An app is using the camera" : "No app is using the camera")}>
           <Toggle label="Start the PC camera automatically" on={c.camera_auto} onChange={(v) => save({ camera_auto: v })} />
         </Row>
-        <Row label="PC microphone" hint={s.mic_detail || "Pick “BlackHole 2ch” as the microphone in your app (install BlackHole 2ch once)"}>
+        <Row label="PC microphone" hint={s.mic_detail || "Pick 'BlackHole 2ch' as the microphone in your app (install BlackHole 2ch once)"}>
           <span className="text-caption text-muted">{s.camera_wanted ? "With the camera" : "Idle"}</span>
         </Row>
         <Row label="Stream now" hint="Keep the PC camera on regardless">
