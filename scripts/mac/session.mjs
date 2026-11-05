@@ -87,6 +87,16 @@ if (cmd === "start") {
   fs.writeFileSync(args[0], Buffer.from(r.png.split(",")[1], "base64"));
   console.log("canvas", r.cw, r.ch);
   await b.close();
+} else if (cmd === "click") {
+  // click <fx,fy>: fractions of the remote screen
+  const [b, p] = await page();
+  const [fx, fy] = args[0].split(",").map(Number);
+  const r = await p.locator("canvas").boundingBox();
+  await p.mouse.move(r.x + r.width * fx, r.y + r.height * fy, { steps: 4 });
+  await sleep(300);
+  await p.mouse.click(r.x + r.width * fx, r.y + r.height * fy);
+  await sleep(500);
+  await b.close();
 } else if (cmd === "keys") {
   const [b, p, key] = await page();
   for (const c of args) await combo(p, key, c);
