@@ -97,6 +97,15 @@ if (cmd === "start") {
   await p.mouse.click(r.x + r.width * fx, r.y + r.height * fy);
   await sleep(500);
   await b.close();
+} else if (cmd === "scroll") {
+  // scroll <fx,fy> <dy>: wheel over a point of the remote screen
+  const [b, p] = await page();
+  const [fx, fy] = args[0].split(",").map(Number);
+  const r = await p.locator("canvas").boundingBox();
+  await p.mouse.move(r.x + r.width * fx, r.y + r.height * fy, { steps: 3 });
+  for (let i = 0; i < 5; i++) { await p.mouse.wheel(0, Number(args[1]) / 5); await sleep(80); }
+  await sleep(400);
+  await b.close();
 } else if (cmd === "keys") {
   const [b, p, key] = await page();
   for (const c of args) await combo(p, key, c);
