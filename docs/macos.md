@@ -51,3 +51,11 @@ bash ~/mirrormagic-build/install-runner.sh <commit>   # also queues a build of s
 ```
 
 After that, each build is: upload `src-<commit>.tgz` (and the p12 files into `sign/`), then upload any file named `<commit>` into `~/mirrormagic-build/queue/`. `runner.sh` removes it and runs `build-on-mac.sh`; its own log is `runner.log`. Anyone who can write into `queue/` can build and run code as the user; that is the same trust as the Tether access used to upload.
+
+Installed on the user's Mac since 2026-11-06 (macOS shows "Background Items Added: bash" once). Upload pitfalls with `session.mjs` (Tether file transfer):
+
+- Give the full target file path; a folder as target reports `job_done` but writes nothing.
+- Upload each file from a local folder that holds only that file, in a fresh `start --file-transfer` session: later jobs in a session were seen to send a different file of the same folder.
+- `build-on-mac.sh` deletes `sign/cs.p12` and `p12.pass` after importing them, so upload them again before every queued build.
+- Check sizes with `ls`; `rm <remote-file>` deletes a wrong file.
+
