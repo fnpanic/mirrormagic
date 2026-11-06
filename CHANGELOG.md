@@ -15,7 +15,7 @@
 
 ## 0.5.15 — 2026-11-06 (Mac)
 
-- **Monitor mode: the screen no longer goes black after a while.** Input that MirrorMagic posts on the Mac (CGEvents) doesn't count as user activity for the macOS display-sleep timer. While the user worked through the PC keyboard and mouse, the Mac put its display to sleep after its timeout (monitor mode 19:25–19:41, black in between). Now, while the PC controls the Mac, MirrorMagic reports user activity to macOS at most every 5 s (`IOPMAssertionDeclareUserActivity`), as real input does.
+- **Monitor mode: the screen no longer goes black after a while.** Input that MirrorMagic posts on the Mac (CGEvents) doesn't count as user activity for the macOS display-sleep timer. While the user worked through the PC keyboard and mouse, the Mac put its display to sleep after its timeout (monitor mode 19:25–19:41, black in between). Now, while the PC controls the Mac, MirrorMagic reports user activity to macOS at most every 5 s (`IOPMAssertionDeclareUserActivity`), as real input does. Not yet verified in a long monitor-mode session (the user will test it later).
 - **PC microphone in Teams: use is now noticed.** 0.5.12–0.5.14 asked each process for its device list to see whether an app used a "– PC" device. That list doesn't name aggregate devices, so the Teams test call never started the PC microphone (no `audio: Mac apps use …` in the Mac log). Now the device's own "running somewhere" flag is used; MirrorMagic itself never runs I/O on these devices. The Mac log reports the PC microphone's level every 5 s while it streams (`audio: … chunks of the PC microphone, peak level …`).
 
 ## 0.5.14 — 2026-11-06 (protocol 7)
