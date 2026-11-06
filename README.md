@@ -44,6 +44,7 @@ clipboard (text/HTML/PNG) ◄─────────────────
 - **Security**: every connection is encrypted and mutually authenticated with Noise `NNpsk0_25519_ChaChaPoly_BLAKE2s`, keyed with the 128-bit pairing key. A wrong key fails the handshake. LAN discovery (UDP broadcast) reveals only the PC's name. The camera stream reaches OBS only through 127.0.0.1 on the Mac.
 - **No stuck keys**: each key and button is owned by the side that saw its press. Its release goes to the same side, and every switch releases everything on the Mac.
 - **Monitor switch-back**: many monitors ignore DDC on an inactive input. When you switch back, both the PC and the Mac (whose input is active then) send the command.
+- **Game mode**: while a full-screen game (or video) is in front, MirrorMagic removes its input hooks: no crossing at the edge, no hotkey, and zero added input latency. Leaving the game turns everything back on within half a second.
 - **Away from the PC**: when Windows turns the screen off, monitors with auto input detection jump to the Mac. When the screen comes back on, MirrorMagic switches the monitor back to the PC (unless monitor mode is on).
 - **Keyboard**: keys are mapped by position, like a hardware KVM; the Mac's layout decides the character. With a German layout, AltGr combos are translated (`AltGr+Q` → `@`, `AltGr+8/9` → `[ ]`, `AltGr+7/0` → `{ }`, `AltGr+ß` → `\`, `AltGr+<` → `|`, `AltGr++` → `~`). With "Ctrl works as ⌘" (on by default) Ctrl+C/V copy and paste on the Mac like on Windows, and the Win key acts as Control; with it off, the Win key is Command.
 

@@ -80,14 +80,25 @@ pub fn run() {
             crate::status::update(|s| s.last_error = "could not install the input hooks".into());
             return;
         }
-        SetTimer(null_mut(), 0, 2000, None);
+        // Every 500 ms: game mode check (no hooks at all while a full-screen app is in front, so
+        // games get their input with zero added latency); every 2 s: re-install.
+        SetTimer(null_mut(), 0, 500, None);
+        let (mut tick, mut hooked) = (0u32, true);
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
             if msg.message == WM_TIMER {
-                // unhook first: two live copies would process every event twice
-                UnhookWindowsHookEx(kb);
-                UnhookWindowsHookEx(ms);
-                (kb, ms) = install();
+                tick = tick.wrapping_add(1);
+                let want = crate::pc::hooks_wanted(super::fullscreen_app_in_front());
+                if hooked && (!want || tick % 4 == 0) {
+                    // unhook first: two live copies would process every event twice
+                    UnhookWindowsHookEx(kb);
+                    UnhookWindowsHookEx(ms);
+                    hooked = false;
+                }
+                if want && !hooked {
+                    (kb, ms) = install();
+                    hooked = true;
+                }
                 continue;
             }
             TranslateMessage(&msg);

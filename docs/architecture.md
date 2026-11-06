@@ -28,6 +28,7 @@
 
 ## Hook rules (Windows)
 
+- Game mode: every 500 ms the hook thread checks whether the foreground window covers its whole monitor without being maximized (`win::fullscreen_app_in_front`). If so, and the PC has control, both hooks are removed until that changes (`pc::hooks_wanted`), so games see no hook latency and the pointer can't cross.
 - Hook callbacks must return in milliseconds or Windows silently unhooks them. The callbacks only lock the state machine and queue messages. UI updates, cursor hiding, DDC and clipboard work run on other threads.
 - Injected events (`LLKHF_INJECTED`/`LLMHF_INJECTED`) are ignored, so remote-control tools on the PC never cross to the Mac.
 - No crossing while a mouse button is held, so drag-and-drop stays on the PC.

@@ -30,6 +30,7 @@ export interface Status {
   rtt_ms: number | null;
   control: "local" | "edge" | "monitor";
   monitor_on_mac: boolean;
+  game_mode: boolean;
   ddc: { monitor: string; current: number | null; inputs: number[]; last: string };
   camera_on: boolean;
   camera_detail: string;

@@ -13,6 +13,8 @@ pub struct Status {
     /// "local" | "edge" | "monitor"
     pub control: String,
     pub monitor_on_mac: bool,
+    /// A full-screen app is in front: input hooks removed, no edge crossing (PC only).
+    pub game_mode: bool,
     pub ddc: DdcStatus,
     pub camera_on: bool,
     pub camera_detail: String,

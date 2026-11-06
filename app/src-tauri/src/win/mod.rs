@@ -25,6 +25,36 @@ pub fn monitors() -> Vec<Rect> {
     v
 }
 
+/// Covers its whole monitor without merely being maximized, and is not the desktop/taskbar:
+/// games (exclusive or borderless), full-screen video, presentations.
+fn is_fullscreen(class: &str, zoomed: bool, win: RECT, mon: RECT) -> bool {
+    !zoomed
+        && !matches!(class, "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
+        && win.left <= mon.left
+        && win.top <= mon.top
+        && win.right >= mon.right
+        && win.bottom >= mon.bottom
+}
+
+pub fn fullscreen_app_in_front() -> bool {
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+    unsafe {
+        let h = GetForegroundWindow();
+        if h.is_null() {
+            return false;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(h, class.as_mut_ptr(), class.len() as i32).max(0) as usize;
+        let mut win: RECT = std::mem::zeroed();
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if GetWindowRect(h, &mut win) == 0 || GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mut info) == 0 {
+            return false;
+        }
+        is_fullscreen(&String::from_utf16_lossy(&class[..n]), IsZoomed(h) != 0, win, info.rcMonitor)
+    }
+}
+
 pub fn warp(x: f64, y: f64) {
     unsafe { SetCursorPos(x.round() as i32, y.round() as i32) };
 }
@@ -112,4 +142,28 @@ pub fn restore_cursors() {
 
 pub fn hostname() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_fullscreen;
+    use windows_sys::Win32::Foundation::RECT;
+
+    const fn r(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+        RECT { left, top, right, bottom }
+    }
+
+    #[test]
+    fn games_count_as_fullscreen_maximized_windows_and_the_desktop_do_not() {
+        let mon = r(0, 0, 2560, 1440);
+        assert!(is_fullscreen("UnrealWindow", false, mon, mon)); // borderless game
+        assert!(is_fullscreen("SDL_app", false, r(0, 0, 2560, 1440), mon));
+        assert!(is_fullscreen("Chrome_WidgetWin_1", false, r(-1, -1, 2561, 1441), mon)); // F11 video
+        assert!(!is_fullscreen("Chrome_WidgetWin_1", true, r(-8, -8, 2568, 1448), mon)); // maximized: taskbar stays
+        assert!(!is_fullscreen("Notepad", false, r(100, 100, 900, 700), mon));
+        assert!(!is_fullscreen("Progman", false, mon, mon)); // the desktop itself
+        assert!(!is_fullscreen("WorkerW", false, mon, mon));
+        // a game on the second monitor
+        assert!(is_fullscreen("UnityWndClass", false, r(2560, 0, 4480, 1080), r(2560, 0, 4480, 1080)));
+    }
 }

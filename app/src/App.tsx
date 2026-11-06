@@ -198,6 +198,7 @@ function PcView(p: ViewProps) {
           Push the pointer past the {c.side.toLowerCase()} edge to control the Mac, and push it back to return.
           Drag-and-drop never crosses. <b className="font-semibold text-ink-80">Scroll Lock</b> always takes control back.
         </p>
+        {s.game_mode && <p className="text-footnote text-accent">Game mode: a full-screen app is in front. MirrorMagic stays out of its input (no crossing, no hotkey, no added latency) until you leave it.</p>}
         {s.control !== "local" && <Btn onClick={api.takeBack}>Take control back</Btn>}
       </Card>
 
