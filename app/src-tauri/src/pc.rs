@@ -126,7 +126,14 @@ pub fn release() {
     run(out);
 }
 
+/// Protocol version agreed with the connected Mac.
+static PEER_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(PROTOCOL_VERSION);
+
 pub fn send(m: Msg) {
+    if matches!(m, Msg::FilesOffer { .. }) && PEER_VERSION.load(Ordering::SeqCst) < 3 {
+        status::update(|s| s.clipboard = "files need MirrorMagic 0.5 on the Mac".into());
+        return;
+    }
     if let Some(tx) = CTRL_TX.lock().unwrap().as_ref() {
         let _ = tx.send(m);
     }
@@ -247,10 +254,16 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
     })?;
     let hello = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.map_err(|_| "no hello")??;
     let Msg::Hello { version, name, channel } = hello else { return Err("expected hello".into()) };
-    tx.send(&Msg::Hello { version: PROTOCOL_VERSION, name: win::hostname(), channel }).await?;
-    if version != PROTOCOL_VERSION {
+    // answer with the lower version: an older Mac keeps working while it waits for its update
+    let agreed = version.min(PROTOCOL_VERSION);
+    tx.send(&Msg::Hello { version: agreed, name: win::hostname(), channel }).await?;
+    if agreed < mm_core::proto::MIN_COMPATIBLE_VERSION {
         status::update(|s| s.last_error = format!("{name} runs an incompatible MirrorMagic version"));
         return Err("version mismatch".into());
+    }
+    if channel == Channel::Control {
+        PEER_VERSION.store(agreed, Ordering::SeqCst);
+        status::log(format!("{name} connected with protocol {agreed}"));
     }
     match channel {
         Channel::Control => control(tx, rx, name, addr.ip().to_string()).await,

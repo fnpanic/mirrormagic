@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
 pub const PROTOCOL_VERSION: u32 = 3; // 3: clipboard files
+/// Oldest peer version still understood: newer versions only append messages, so the PC answers
+/// with the lower of both versions and never sends a peer messages it does not know.
+pub const MIN_COMPATIBLE_VERSION: u32 = 2;
 pub const DEFAULT_PORT: u16 = 24850;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

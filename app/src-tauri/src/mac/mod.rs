@@ -156,7 +156,7 @@ async fn open(channel: Channel) -> Result<(secure::Sender, secure::Receiver, Str
     let (mut tx, mut rx) = secure::connect(s, &key).await.map_err(|_| "the PC refused the pairing key")?;
     tx.send(&Msg::Hello { version: PROTOCOL_VERSION, name: sys::hostname(), channel }).await?;
     let Msg::Hello { version, name, .. } = rx.recv().await? else { return Err("unexpected reply".into()) };
-    if version != PROTOCOL_VERSION {
+    if !(mm_core::proto::MIN_COMPATIBLE_VERSION..=PROTOCOL_VERSION).contains(&version) {
         return Err(format!("{name} runs an incompatible MirrorMagic version").into());
     }
     Ok((tx, rx, name, host))

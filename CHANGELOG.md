@@ -3,7 +3,7 @@
 ## 0.5.0 — 2026-11-06
 
 - **Copy files through the clipboard.** Copy files or folders in Explorer or Finder, switch to the other machine, paste. They travel on their own encrypted connection, so input never waits behind a big file. The status shows progress, and the files land in a temporary MirrorMagic folder that is cleaned after a day. Paths from the peer are sanitised (no `..`, absolute paths or drive letters). Limits: 4 GB and 50,000 items per copy.
-- Protocol version 3.
+- Protocol version 3, and **version negotiation**: the PC answers with the lower of both versions and never sends a peer messages it does not know. Updating PC and Mac in either order keeps keyboard, mouse and clipboard working; file copy needs 0.5 on both.
 
 ## 0.4.0 — 2026-11-06
 

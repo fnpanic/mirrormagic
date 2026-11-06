@@ -68,6 +68,11 @@ if (cmd === "start") {
   const env = { ...process.env, TETHER_PROFILE: "mm-" + PORT, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}`, MMPW: pw };
   const pid = execFileSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(HERE, "hidden-run.ps1"), "-Exe", EXE, "-Desktop", "mm-mac-" + PORT, "-Args", `--connect ${MAC_ID} --password-env MMPW ${args.join(" ")}`], { env }).toString().trim();
   const [b, p] = await page();
+  // file transfer: jobs issued before the remote listing has loaded are silently lost
+  for (let i = 0; i < 100 && args.includes("--file-transfer"); i++) {
+    if (await p.evaluate(() => /\b(Desktop|Downloads|Library)\b[\s\S]*\b(Desktop|Downloads|Library)\b/.test(document.body.innerText))) break;
+    await sleep(200);
+  }
   for (let i = 0; i < 150 && !args.includes("--file-transfer"); i++) {
     if (await p.evaluate(() => { const c = document.querySelector("canvas"); return !!c && !(c.width === 300 && c.height === 150); })) break;
     await sleep(200);
