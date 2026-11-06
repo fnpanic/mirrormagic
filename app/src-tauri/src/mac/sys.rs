@@ -10,12 +10,14 @@ use std::ffi::c_void;
 
 // ---------------------------------------------------------------- displays
 
+/// Connected displays that show their own desktop. A display mirroring another is left out:
+/// while mirroring, macOS alternates which display of the set it reports as active, which made
+/// the monitor-mode cursor area flip between the laptop's and the monitor's size.
 pub fn displays() -> Vec<DisplayInfo> {
-    CGDisplay::active_displays()
-        .unwrap_or_default()
+    online_displays()
         .into_iter()
-        .map(|id| {
-            let d = CGDisplay::new(id);
+        .filter(|d| d.mirrors_display() == 0)
+        .map(|d| {
             let b = d.bounds();
             let builtin = d.is_builtin();
             DisplayInfo {

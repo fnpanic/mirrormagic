@@ -21,6 +21,8 @@ pub enum Effect {
     Leave { along: f32, park: (f64, f64) },
 }
 
+/// A real cursor position this far (points) from the tracked one means the Mac's own trackpad moved it.
+const OS_MOVED: f64 = 3.0;
 /// How far inside the shared edge the Mac's cursor waits after handing control back.
 const PARK_INSET: f64 = 48.0;
 
@@ -71,10 +73,7 @@ impl Secondary {
             return;
         }
         a.area = area;
-        a.pos = os_pos.filter(|p| area.contains(p.0, p.1)).unwrap_or(match mode {
-            Mode::Monitor => area.center(),
-            Mode::Edge => (a.pos.0.clamp(area.x, area.x + area.w - 1.0), a.pos.1.clamp(area.y, area.y + area.h - 1.0)),
-        });
+        a.pos = os_pos.filter(|p| area.contains(p.0, p.1)).unwrap_or((a.pos.0.clamp(area.x, area.x + area.w - 1.0), a.pos.1.clamp(area.y, area.y + area.h - 1.0)));
     }
 
     /// Returns the absolute point to warp the cursor to.
@@ -102,7 +101,10 @@ impl Secondary {
     pub fn motion(&mut self, dx: i32, dy: i32, os_pos: Option<(f64, f64)>) -> Option<Effect> {
         let a = self.active.as_mut()?;
         let (dx, dy) = (dx as f64 * self.speed, dy as f64 * self.speed);
-        let base = os_pos.filter(|p| a.area.contains(p.0, p.1)).unwrap_or(a.pos);
+        // The real position wins only if something else (the Mac's trackpad) clearly moved the
+        // cursor: a read-back that is rounded or not yet updated must not nudge it (drift).
+        let moved_locally = |p: &(f64, f64)| (p.0 - a.pos.0).abs() > OS_MOVED || (p.1 - a.pos.1).abs() > OS_MOVED;
+        let base = os_pos.filter(|p| a.area.contains(p.0, p.1) && moved_locally(p)).unwrap_or(a.pos);
         let (nx, ny) = (base.0 + dx, base.1 + dy);
         let r = a.area;
         if a.mode == Mode::Edge {
@@ -192,6 +194,21 @@ mod tests {
         m.exit();
         m.set_displays(Displays { edge: Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, monitor: None }, None);
         assert_eq!(m.enter(Mode::Monitor, Side::Right, 0.0), (50.0, 50.0));
+    }
+
+    #[test]
+    fn a_lagging_or_rounded_os_position_causes_no_drift() {
+        let mut m = mac();
+        m.enter(Mode::Monitor, Side::Right, 0.5); // (3008, 520)
+        // macOS reports the cursor one event behind and rounded: 1000 tiny moves right must add up
+        let (mut last, mut before) = ((3008.0, 520.0), (3008.0, 520.0));
+        for _ in 0..1000 {
+            let Some(Effect::MoveTo { x, y, .. }) = m.motion(1, 0, Some((before.0 - 0.4, before.1))) else { panic!() };
+            (before, last) = (last, (x, y));
+        }
+        assert_eq!(last, (4008.0, 520.0));
+        // a real trackpad move (far from the tracked position) is still followed
+        assert_eq!(m.motion(0, 1, Some((2000.0, 600.0))), Some(Effect::MoveTo { x: 2000.0, y: 601.0, dx: 0.0, dy: 1.0 }));
     }
 
     #[test]

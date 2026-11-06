@@ -2,6 +2,7 @@
 
 ## 0.5.5 — 2026-11-06 (Mac)
 
+- **Fixed: the Mac cursor drifted and jumped (since 0.5.1).** While the screen was mirrored for monitor mode, macOS alternated which display of the mirror set it reported as active. The half-second layout check from 0.5.1 then flipped the cursor area between the laptop's size and the monitor's, and the cursor jumped or got clamped. The display list now holds all connected displays and leaves out a display that only mirrors another. In addition, the real cursor position overrides the tracked one only if it is more than 3 points away (the Mac's own trackpad moved it), so a rounded or late read-back can't nudge the cursor. When the layout changes, the cursor is clamped into the new area instead of jumping to its middle.
 - **The Mac's cursor stays visible after you go back to the PC.** It used to wait in the last pixel column of the shared edge, where macOS draws the arrow off-screen, so the Mac seemed to have no cursor until you crossed over from Windows again. It now waits 48 points inside the edge, at the height where you left, ready for the Mac's own trackpad.
 - Leaving monitor mode puts the Mac's cursor in the middle of the laptop screen. Otherwise it could stay on the shared monitor's area, which shows the PC again.
 

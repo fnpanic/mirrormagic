@@ -7,6 +7,9 @@
 //   node session.mjs paste <text|@file>          paste text via clipboard sync (layout-safe), Windows clipboard restored
 //   node session.mjs put <local> <remote-file>   upload a file   (needs a --file-transfer session)
 //   node session.mjs get <remote> <local-file>   download a file (needs a --file-transfer session)
+//   node session.mjs rm <remote-file>            delete a file on the Mac
+//   Upload each file from a folder that holds only that file: with other files next to it, later
+//   jobs in a session were seen to send a different file of that folder. Verify sizes with ls.
 //   Both targets are FULL file paths: a folder as target reports job_done but writes nothing.
 //   Existing targets are not overwritten (the job waits on an override prompt): use new names.
 // Git Bash: run with MSYS_NO_PATHCONV=1 or /Users/... paths get rewritten into Windows paths.
@@ -145,6 +148,12 @@ if (cmd === "start") {
     return res + " " + JSON.stringify(evs.filter((e) => e && e.name !== "update_quality_status")).slice(0, 3000);
   }, [key, args[0], cmd]);
   console.log(r);
+  await b.close();
+} else if (cmd === "rm") {
+  // rm <remote-file>
+  const [b, p, key] = await page();
+  console.log(await p.evaluate(([k, f]) => window.__TAURI_INTERNALS__.invoke("fs_remove", { key: k, id: 31000 + Math.floor(Math.random() * 999), path: f, isRemote: true, isDir: false }).then(() => "ok", (e) => "ERR " + e), [key, args[0]]));
+  await new Promise((s) => setTimeout(s, 1500));
   await b.close();
 } else if (cmd === "put" || cmd === "get") {
   const [b, p, key] = await page();
