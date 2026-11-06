@@ -210,8 +210,17 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
         tokio::spawn(async move {
             let mut could = sys::can_inject(false);
             let mut reported: Option<Instant> = None;
+            let mut seen = String::new();
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                // diagnostics: where is the Mac's pointer while the PC does not control it?
+                if !sec().is_active() {
+                    let (now, at) = pointer_state();
+                    if now != seen {
+                        status::log(format!("pointer (Mac in charge): {now}, at {at}"));
+                        seen = now;
+                    }
+                }
                 // someone works on the Mac: keep the PC screen on (else the monitor shows the Mac's second screen)
                 let since = reported.map_or(f64::MAX, |r| r.elapsed().as_secs_f64());
                 if PEER_VERSION.load(Ordering::SeqCst) >= 5 && mm_core::secondary::mac_active_due(sys::idle_seconds(), since) {
@@ -244,6 +253,21 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
     mirror(false);
     PC_DISPLAY_OFF.store(false, Ordering::SeqCst);
     r
+}
+
+/// ("visible on the built-in display", "x,y"): changes of the first are logged to find pointer trouble.
+fn pointer_state() -> (String, String) {
+    let Some((x, y)) = inject::cursor() else { return ("unknown".into(), String::new()) };
+    let d = sec().displays.clone();
+    let on = if d.edge.contains(x, y) {
+        "built-in display"
+    } else if d.monitor.is_some_and(|m| m.contains(x, y)) {
+        "shared monitor (invisible unless monitor mode)"
+    } else {
+        "outside all displays"
+    };
+    let visible = if sys::cursor_visible() { "visible" } else { "HIDDEN" };
+    (format!("{visible} on the {on}"), format!("{x:.0},{y:.0}"))
 }
 
 static PC_DISPLAY_OFF: AtomicBool = AtomicBool::new(false);
@@ -347,6 +371,7 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                 Some(Effect::Leave { along, park }) => {
                     inj().release_all();
                     inj().warp(park.0, park.1); // visible for the Mac's own trackpad
+                    inj().nudge(park.0, park.1);
                     let tx = utx.clone();
                     clipboard::hand_over(move |m| drop(tx.send(m)));
                     let _ = utx.send(Msg::Leave { along });

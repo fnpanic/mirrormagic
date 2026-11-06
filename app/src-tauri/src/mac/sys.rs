@@ -95,6 +95,16 @@ extern "C" {
     fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
 }
 
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGCursorIsVisible() -> u32;
+}
+
+/// Is the pointer currently shown (system-wide)? Diagnostics only.
+pub fn cursor_visible() -> bool {
+    unsafe { CGCursorIsVisible() != 0 }
+}
+
 /// Seconds since the last keyboard/mouse/trackpad input on this Mac (HID system state, any event).
 pub fn idle_seconds() -> f64 {
     unsafe { CGEventSourceSecondsSinceLastEventType(1, u32::MAX) }

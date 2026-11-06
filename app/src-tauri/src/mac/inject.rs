@@ -55,6 +55,13 @@ impl Injector {
         }
     }
 
+    /// After handing control back: a real 1-point move there and back, so a pointer that an app
+    /// hid while typing ("hidden until the mouse moves") shows again for the Mac's own trackpad.
+    pub fn nudge(&self, x: f64, y: f64) {
+        self.move_to(x + 1.0, y, 1.0, 0.0);
+        self.move_to(x, y, -1.0, 0.0);
+    }
+
     /// Jump (enter / warp) without deltas.
     pub fn warp(&self, x: f64, y: f64) {
         let p = CGPoint::new(x, y);

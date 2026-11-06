@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.10 — 2026-11-06 (Mac)
+
+- After control goes back to the PC, the Mac sends a real 1-point move there and back. Apps such as Terminal hide the pointer while you type until the mouse moves, and that state could keep the Mac's pointer hidden after you switched back.
+- Diagnostics: while the Mac is in charge, the log records whether the pointer is visible and which display it is on, once per change (`pointer (Mac in charge): …`).
+
 ## 0.5.9 — 2026-11-06 (Mac)
 
 - **Keys keep the Mac keyboard's positions:** Ctrl = Control, Win = Option, Alt = Command. Before, Ctrl acted as Command, which left no Command key at Alt's position. The right Alt (AltGr) stays Option, with the German fix-ups for @ € { } [ ] \ | ~. The old behaviour is the "Windows shortcuts" setting (off by default). The former "Ctrl works as ⌘" setting is not carried over.
