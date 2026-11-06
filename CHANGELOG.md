@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2 — 2026-11-06 (PC only)
+
+- **Fixed: after Windows turned the screen off (you were away), the monitor stayed on the Mac.** With the PC's DisplayPort signal gone, the monitor's automatic input detection jumped to the Mac's HDMI signal and stayed there, so you had to unplug HDMI. MirrorMagic now notices when Windows turns the screen back on. Unless monitor mode deliberately shows the Mac, it reads the monitor's input over DDC and, if it isn't the PC's, switches back from both the PC and the Mac. Log lines: `display off (Windows power saving)`, `display on: …`.
+
 ## 0.5.1 — 2026-11-06
 
 - **Fixed: after a monitor switch the Mac cursor could stick to the top edge** and only move sideways until the next switch. macOS applies the mirror layout asynchronously; when the shared monitor's area was read before it moved (from above the laptop screen to 0,0), every move was clamped into the old rectangle. While the PC controls it, the Mac now re-reads the display layout every 500 ms and moves the session to the new area. That also covers HDMI re-plugs and resolution changes mid-session.

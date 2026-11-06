@@ -1,6 +1,7 @@
 //! Windows platform layer: hooks, cursor, monitors, webcam.
 pub mod camera;
 pub mod hook;
+pub mod power;
 
 use mm_core::primary::Rect;
 use std::ptr::null_mut;

@@ -173,6 +173,43 @@ fn switch_monitor(to_mac: bool) {
     });
 }
 
+// ---------------------------------------------------------------- display off/on (user away)
+
+/// Windows turned the display on after it was off, i.e. the user came back.
+fn display_came_back(prev: u32, now: u32) -> bool {
+    prev == 0 && now == 1
+}
+
+/// While Windows has the display off, monitors with automatic input detection jump to the Mac's
+/// HDMI signal and stay there. When the display comes back, the PC input is restored, unless
+/// monitor mode deliberately shows the Mac.
+fn on_display_state(state: u32) {
+    static LAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    let prev = LAST.swap(state, Ordering::SeqCst);
+    if state == 0 && prev != 0 {
+        std::thread::spawn(|| status::log("display off (Windows power saving)"));
+    }
+    if display_came_back(prev, state) {
+        std::thread::spawn(restore_pc_input);
+    }
+}
+
+fn restore_pc_input() {
+    std::thread::sleep(Duration::from_secs(2)); // let the DisplayPort link come up first
+    if primary().monitor_on_mac {
+        return status::log("display on: monitor mode shows the Mac, input left alone");
+    }
+    let pc = config::get().pc_input;
+    match ddc::current() {
+        Some(v) if v == pc => status::log("display on: the monitor shows the PC"),
+        cur => {
+            // None: DDC from the PC often fails while another input is active, so ask anyway
+            status::log(format!("display on: monitor input {cur:?}, switching back to {}", ddc::input_name(pc)));
+            switch_monitor(false);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- start
 
 pub fn start(rt: &tokio::runtime::Handle) {
@@ -183,6 +220,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     rt.spawn(server());
     rt.spawn(discovery());
     std::thread::spawn(maintenance);
+    win::power::watch_display(on_display_state);
     std::thread::spawn(|| {
         let p = ddc::probe();
         status::update(|s| {
@@ -489,5 +527,21 @@ async fn files_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Resu
             r
         }
         _ => Err("unexpected files message".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_came_back;
+
+    #[test]
+    fn only_off_to_on_means_the_user_is_back() {
+        // Windows: on (1) → dimmed (2) → off (0) → on (1); the first notice repeats the current state
+        assert!(!display_came_back(1, 1));
+        assert!(!display_came_back(1, 2));
+        assert!(!display_came_back(2, 1)); // dimmed screens keep their signal: no input change
+        assert!(!display_came_back(2, 0));
+        assert!(display_came_back(0, 1));
+        assert!(!display_came_back(0, 2));
     }
 }
