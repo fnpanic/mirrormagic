@@ -22,7 +22,7 @@ Windows is the primary side (it owns keyboard, mouse and webcam). The Mac connec
 2. Allow **Accessibility** when macOS asks (Privacy & Security). Without it the Mac can't be controlled.
 3. Allow **Local Network** when macOS asks.
 4. For the camera: install [OBS Studio](https://obsproject.com) and allow its camera extension when macOS asks; MirrorMagic configures OBS by itself. Then pick "OBS Virtual Camera" in your apps.
-5. For calls: every PC microphone and speaker appears on the Mac as "<name> – PC" (macOS 14.2+, no driver needed). Pick them in Teams, Zoom or the browser, e.g. "Mikrofon (Jabra Link 390) – PC" and "Lautsprecher (Jabra Link 390) – PC". Allow "System Audio Recording" once when macOS asks.
+5. For calls: every PC microphone and speaker appears on the Mac as "<name> – PC" (macOS 14.2+, no driver needed). Pick them in Teams, Zoom or the browser, e.g. "Mikrofon (Jabra Link 390) – PC" and "Lautsprecher (Jabra Link 390) – PC". Allow "System Audio Recording" once when macOS asks. Add Teams (or Zoom, the browser) to the same list under System Settings → Privacy & Security → Screen & System Audio Recording, or the "– PC" microphone stays silent there.
 
 ## Settings (PC)
 
