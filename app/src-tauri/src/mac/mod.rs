@@ -166,7 +166,11 @@ async fn open(channel: Channel) -> Result<(secure::Sender, secure::Receiver, Str
 }
 
 async fn client_loop() {
+    let mut lost = Instant::now();
     loop {
+        if lost.elapsed().as_secs() >= HDMI_BACK_S {
+            hdmi_on("no PC for 5 min");
+        }
         match open(Channel::Control).await {
             Ok((tx, rx, name, host)) => {
                 status::update(|s| {
@@ -176,6 +180,7 @@ async fn client_loop() {
                     s.last_error.clear();
                 });
                 let r = session(tx, rx).await;
+                lost = Instant::now();
                 if let Err(e) = r {
                     status::update(|s| s.last_error = format!("connection lost: {e}"));
                 }
@@ -213,6 +218,7 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
             let mut seen = String::new();
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                hdmi_off();
                 // diagnostics: where is the Mac's pointer while the PC does not control it?
                 if !sec().is_active() {
                     let (now, at) = pointer_state();
@@ -296,12 +302,61 @@ fn sleep_displays_when_idle() {
     SLEEP_WATCH.store(false, Ordering::SeqCst);
 }
 
+/// The shared monitor's display while MirrorMagic has its output off (it is not online then).
+static HDMI_OFF: Mutex<Option<u32>> = Mutex::new(None);
+/// When monitor mode last ended (ms since T0): the switch back over DDC needs the HDMI link.
+static MONITOR_LEFT_MS: AtomicU64 = AtomicU64::new(0);
+/// Turn the HDMI output back on after this long without the PC (PC shut down: monitor for the Mac).
+const HDMI_BACK_S: u64 = 300;
+
+fn now_ms() -> u64 {
+    T0.get().unwrap().elapsed().as_millis() as u64
+}
+
+/// Outside monitor mode the Mac's HDMI output is off while the PC is connected: otherwise the
+/// monitor's automatic input detection shows the Mac whenever the PC's signal is gone (PC screen
+/// asleep, user wakes the Mac first). Re-checked every 2 s, because waking the monitor or
+/// re-plugging HDMI brings the display back.
+fn hdmi_off() {
+    static LAST_ERR: Mutex<String> = Mutex::new(String::new());
+    if config::get().mirrored || now_ms().saturating_sub(MONITOR_LEFT_MS.load(Ordering::SeqCst)) < 5000 {
+        return;
+    }
+    let Some(id) = sys::external_display() else { return };
+    let r = sys::set_display_enabled(id, false);
+    match &r {
+        Ok(()) => {
+            *HDMI_OFF.lock().unwrap() = Some(id);
+            status::log(format!("HDMI output off (display {id}): the monitor gets the Mac's signal only in monitor mode"));
+        }
+        Err(e) if *LAST_ERR.lock().unwrap() != *e => status::log(format!("HDMI output off failed: {e}")),
+        Err(_) => {}
+    }
+    *LAST_ERR.lock().unwrap() = r.err().unwrap_or_default();
+}
+
+/// Monitor mode (or no PC for a while): turn the HDMI output on and wait until it is online.
+fn hdmi_on(why: &str) {
+    let Some(id) = HDMI_OFF.lock().unwrap().take() else { return };
+    let r = sys::set_display_enabled(id, true);
+    for _ in 0..30 {
+        if sys::external_display().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    status::log(format!("HDMI output on ({why}): {r:?}, online: {}", sys::external_display().is_some()));
+}
+
 /// Monitor mode shows the Mac's main screen: mirror it onto the shared monitor while active.
 fn mirror(on: bool) {
     if config::get().mirrored == on {
         return;
     }
     status::log(format!("mirror {on}"));
+    if !on {
+        MONITOR_LEFT_MS.store(now_ms(), Ordering::SeqCst); // the DDC switch back still needs HDMI
+    }
     match sys::set_mirror(on) {
         Ok(()) => {
             config::update(|c| c.mirrored = on);
@@ -352,6 +407,9 @@ fn set_control(c: &str) {
 fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
     match m {
         Msg::Enter { mode, side, along } => {
+            if mode == Mode::Monitor {
+                hdmi_on("monitor mode");
+            }
             mirror(mode == Mode::Monitor);
             let info = refresh(); // displays may have changed (HDMI plugged, lid closed)
             let _ = utx.send(info);

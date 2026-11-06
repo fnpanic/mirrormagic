@@ -181,7 +181,11 @@ fn switch_monitor(to_mac: bool) {
             if let Some(cur) = ddc::current().filter(|&v| v != c.mac_input) {
                 config::update(|c| c.pc_input = cur);
             }
-            ddc::set_input(c.mac_input)
+            let r = ddc::set_input(c.mac_input);
+            if r.is_ok() {
+                std::thread::spawn(move || recheck_mac_input(seq));
+            }
+            r
         } else {
             // Many monitors ignore DDC on an inactive input, so the Mac (whose input is active
             // now) is asked too; whichever works wins.
@@ -196,6 +200,18 @@ fn switch_monitor(to_mac: bool) {
             }
         });
     });
+}
+
+/// The Mac turns its HDMI output on only when monitor mode starts. A monitor with automatic input
+/// detection may find no signal there yet and go back to the PC: then switch once more.
+fn recheck_mac_input(seq: u64) {
+    std::thread::sleep(Duration::from_secs(4));
+    let _g = DDC_RUN.lock().unwrap();
+    let c = config::get();
+    if DDC_SEQ.load(Ordering::SeqCst) == seq && ddc::current() == Some(c.pc_input) {
+        status::log("monitor went back to the PC before the Mac's HDMI signal was there: switching again");
+        let _ = ddc::set_input(c.mac_input);
+    }
 }
 
 // ---------------------------------------------------------------- game mode

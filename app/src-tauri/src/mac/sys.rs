@@ -76,6 +76,52 @@ pub fn set_mirror(on: bool) -> Result<(), String> {
     builtin.complete_configuration(&cfg, CGConfigureOption::ConfigureForSession).map_err(|e| format!("mirror: {e}"))
 }
 
+/// The first connected external display (the shared monitor), if the built-in screen is on too:
+/// without it (lid closed) the external one is the Mac's only screen and must stay on.
+pub fn external_display() -> Option<u32> {
+    let ds = online_displays();
+    ds.iter().any(|d| d.is_builtin()).then(|| ds.iter().find(|d| !d.is_builtin()).map(|d| d.id))?
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGBeginDisplayConfiguration(config: *mut *mut c_void) -> i32;
+    fn CGCompleteDisplayConfiguration(config: *mut c_void, option: u32) -> i32;
+    fn CGCancelDisplayConfiguration(config: *mut c_void) -> i32;
+}
+extern "C" {
+    fn dlopen(path: *const std::ffi::c_char, mode: i32) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, name: *const std::ffi::c_char) -> *mut c_void;
+}
+
+/// Turns a display's output fully off, as if unplugged (what BetterDisplay calls "disconnect"),
+/// or back on. A private SkyLight call: the only way without root. Configured for this app only,
+/// so macOS turns the display back on by itself when MirrorMagic quits or crashes.
+pub fn set_display_enabled(id: u32, on: bool) -> Result<(), String> {
+    type Enable = unsafe extern "C" fn(*mut c_void, u32, bool) -> i32;
+    let f = unsafe {
+        let h = dlopen(c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight".as_ptr(), 1);
+        let p = if h.is_null() { std::ptr::null_mut() } else { dlsym(h, c"CGSConfigureDisplayEnabled".as_ptr()) };
+        if p.is_null() {
+            return Err("CGSConfigureDisplayEnabled not available".into());
+        }
+        std::mem::transmute::<*mut c_void, Enable>(p)
+    };
+    let mut cfg = std::ptr::null_mut();
+    if unsafe { CGBeginDisplayConfiguration(&mut cfg) } != 0 {
+        return Err("display config failed".into());
+    }
+    let e = unsafe { f(cfg, id, on) };
+    if e != 0 {
+        unsafe { CGCancelDisplayConfiguration(cfg) };
+        return Err(format!("enable {on}: error {e}"));
+    }
+    match unsafe { CGCompleteDisplayConfiguration(cfg, 0) } {
+        0 => Ok(()), // 0 = kCGConfigureForAppOnly
+        e => Err(format!("enable {on}: complete error {e}")),
+    }
+}
+
 pub fn rect(d: &DisplayInfo) -> Rect {
     Rect { x: d.x, y: d.y, w: d.w, h: d.h }
 }
