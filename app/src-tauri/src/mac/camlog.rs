@@ -19,33 +19,42 @@ pub fn follow(tx: Sender<i64>) {
                 "--level",
                 "debug",
                 "--predicate",
-                "subsystem == \"com.apple.cmio\" AND eventMessage CONTAINS \"DeviceControlPID\"",
+                // wider than "DeviceControlPID": macOS versions word it differently
+                "subsystem == \"com.apple.cmio\" AND eventMessage CONTAINS[c] \"ControlPID\"",
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn();
         let mut child = match child {
             Ok(c) => c,
             Err(e) => return crate::status::log(format!("camera log: cannot start `log stream`: {e}")),
         };
         crate::status::log("camera log: following CoreMediaIO control events");
+        // `log stream` may refuse (e.g. "Must be admin"): keep what it says
+        let err = child.stderr.take().unwrap();
+        std::thread::spawn(move || {
+            for l in BufReader::new(err).lines().map_while(Result::ok).take(5) {
+                crate::status::log(format!("camera log: `log stream` says: {l}"));
+            }
+        });
         let mut evidence = 0;
         for line in BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
             let msg = v["eventMessage"].as_str().unwrap_or("");
-            let Some(pid) = parse_control_pid(msg) else { continue };
+            let pid = parse_control_pid(msg);
             if evidence < 40 {
                 // keep the raw lines of the first events: they document what macOS reports
                 evidence += 1;
                 let who = v["processImagePath"].as_str().unwrap_or("?").rsplit('/').next().unwrap_or("?");
                 crate::status::log(format!("camera log: [{who}] {}", msg.chars().take(300).collect::<String>().replace('\n', " ")));
             }
+            let Some(pid) = pid else { continue };
             if tx.send(pid).is_err() {
                 break;
             }
         }
         let _ = child.kill();
-        crate::status::log("camera log: `log stream` ended");
+        crate::status::log(format!("camera log: `log stream` ended ({:?})", child.wait()));
     });
 }
 
