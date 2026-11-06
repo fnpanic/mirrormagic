@@ -6,6 +6,12 @@
 - **The Mac's cursor stays visible after you go back to the PC.** It used to wait in the last pixel column of the shared edge, where macOS draws the arrow off-screen, so the Mac seemed to have no cursor until you crossed over from Windows again. It now waits 48 points inside the edge, at the height where you left, ready for the Mac's own trackpad.
 - Leaving monitor mode puts the Mac's cursor in the middle of the laptop screen. Otherwise it could stay on the shared monitor's area, which shows the PC again.
 
+### Verified on the real machines (2026-11-06)
+
+- Away (0.5.2): screen off for 30 s at 12:24:26. The monitor's auto input detection jumped to the Mac (input 0x11). When the screen came back at 12:24:58, MirrorMagic switched back to DisplayPort, and a DDC read confirmed input 0x0F.
+- Game mode (0.5.3/0.5.4): a borderless full-screen window removed the hooks at 12:24:21, and they came back at 12:24:24 after it closed. Since 0.5.4, Alt+Tab no longer appears as game mode in the log.
+- Mac cursor (0.5.5): after going back to Windows, both screens show a cursor, and the Mac can be used with its own trackpad (confirmed by the user).
+
 ## 0.5.4 — 2026-11-06 (PC only)
 
 - Game mode no longer switches on for a moment at every Alt+Tab. The Windows 11 task switcher is a full-screen Explorer window (`XamlExplorerHostIslandWindow`), so it counted as a full-screen app for about a second and briefly blocked crossing. Shell overlays are excluded now, and the log names the window class that turned game mode on.
