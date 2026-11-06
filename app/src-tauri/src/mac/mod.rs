@@ -439,6 +439,9 @@ fn set_control(c: &str) {
 }
 
 fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
+    if matches!(m, Msg::Motion { .. } | Msg::Button { .. } | Msg::Wheel { .. } | Msg::Key { .. }) {
+        sys::declare_user_activity(); // else the display sleeps while the PC keyboard works the Mac
+    }
     match m {
         Msg::Enter { mode, side, along } => {
             if mode == Mode::Monitor {
@@ -698,8 +701,8 @@ fn audio_watch() {
             *devs = Some(d);
             offered = list;
         }
-        let used = |l: &[(u32, String)], input| l.iter().find(|(d, _)| vaudio::used_by_others(*d, input, me)).map(|x| x.1.clone());
-        let want: Want = (used(&mics, true), used(&speakers, false));
+        let used = |l: &[(u32, String)]| l.iter().find(|(d, _)| vaudio::in_use(*d)).map(|x| x.1.clone());
+        let want: Want = (used(&mics), used(&speakers));
         if want != last {
             status::log(format!("audio: Mac apps use PC microphone {:?}, PC speakers {:?}", want.0, want.1));
             status::update(|s| s.mic_detail = format!("{} · {}", want.0.as_deref().unwrap_or("no PC microphone in use"), want.1.as_deref().unwrap_or("no PC speakers in use")));
@@ -723,6 +726,7 @@ async fn audio_stream(mut want: watch::Receiver<Want>) {
     let mut capture: Option<(String, Arc<AtomicBool>)> = None;
     let mut player = crate::audio::Player::default();
     let mut sent: Option<Want> = None;
+    let (mut chunks, mut peak) = (0u64, 0u16);
     let r: Result<(), secure::Error> = loop {
         let w = want.borrow_and_update().clone();
         if sent.as_ref() != Some(&w) {
@@ -754,9 +758,17 @@ async fn audio_stream(mut want: watch::Receiver<Want>) {
             _ = want.changed() => {}
             m = crx.recv() => if let Some(m) = m { if let Err(e) = tx.send(&m).await { break Err(e) } },
             m = rx.recv() => match m.unwrap_or(Err("closed".into())) {
-                Ok(Msg::Audio { rate, pcm }) => if let Some(r) = player.push(rate, pcm) {
-                    status::log(format!("audio: PC microphone at {rate} Hz: {r:?}"));
-                },
+                Ok(Msg::Audio { rate, pcm }) => {
+                    chunks += 1;
+                    peak = peak.max(pcm.iter().map(|x| x.unsigned_abs()).max().unwrap_or(0));
+                    if chunks % 500 == 0 {
+                        status::log(format!("audio: {chunks} chunks of the PC microphone, peak level {peak}/32768"));
+                        peak = 0;
+                    }
+                    if let Some(r) = player.push(rate, pcm) {
+                        status::log(format!("audio: PC microphone at {rate} Hz: {r:?}"));
+                    }
+                }
                 Ok(_) => {}
                 Err(e) => break Err(e),
             },

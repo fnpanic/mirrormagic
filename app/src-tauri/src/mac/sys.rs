@@ -162,6 +162,29 @@ pub fn cursor_visible() -> bool {
     unsafe { CGCursorIsVisible() != 0 }
 }
 
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOPMAssertionDeclareUserActivity(name: CFStringRef, kind: u32, id: *mut u32) -> i32;
+}
+
+/// Tells macOS someone is using the Mac (as a real key press would): keeps and wakes the display.
+/// Injected CGEvents don't count for the display-sleep timer, so in monitor mode the monitor
+/// went black while the user worked with the PC keyboard. Rate-limited to every 5 s.
+pub fn declare_user_activity() {
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    static ID: AtomicU32 = AtomicU32::new(0);
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if now.saturating_sub(LAST.load(Ordering::Relaxed)) < 5 {
+        return;
+    }
+    LAST.store(now, Ordering::Relaxed);
+    let name = CFString::new("MirrorMagic: input from the PC");
+    let mut id = ID.load(Ordering::Relaxed); // reusing the id updates the same assertion
+    unsafe { IOPMAssertionDeclareUserActivity(name.as_concrete_TypeRef(), 0, &mut id) }; // 0 = kIOPMUserActiveLocal
+    ID.store(id, Ordering::Relaxed);
+}
+
 /// Seconds since the last keyboard/mouse/trackpad input on this Mac (HID system state, any event).
 pub fn idle_seconds() -> f64 {
     unsafe { CGEventSourceSecondsSinceLastEventType(1, u32::MAX) }

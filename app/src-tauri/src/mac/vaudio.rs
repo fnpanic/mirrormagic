@@ -74,14 +74,12 @@ fn list(obj: u32, selector: u32, scope: u32) -> Vec<u32> {
     v
 }
 
-/// Another process (Teams…) records from (`input`) or plays to this device right now. Asked per
-/// process: MirrorMagic's own reading of the speaker tap must not count.
-pub fn used_by_others(dev: u32, input: bool, me: u32) -> bool {
-    let (running, scope) = if input { (cc(b"piri"), cc(b"inpt")) } else { (cc(b"piro"), cc(b"outp")) };
-    list(SYSTEM, cc(b"prs#"), GLOBAL)
-        .into_iter()
-        .filter(|&p| p != me && get::<u32>(p, running, None).unwrap_or(0) != 0)
-        .any(|p| list(p, cc(b"pdv#"), scope).contains(&dev))
+/// An app (Teams…) records from or plays to this device right now. MirrorMagic itself never runs
+/// I/O on these public devices (it reads the speaker taps through private ones), so the device's
+/// own "running somewhere" flag answers it. (0.5.12–0.5.14 asked each process for its devices
+/// instead; that list doesn't name aggregate devices, so use was never noticed.)
+pub fn in_use(dev: u32) -> bool {
+    get::<u32>(dev, cc(b"gone"), None).unwrap_or(0) != 0
 }
 
 /// A tap; returns (id, uid). `device` set: taps that device's first output stream.
