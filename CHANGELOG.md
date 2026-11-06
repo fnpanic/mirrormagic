@@ -3,6 +3,7 @@
 ## 0.5.10 — 2026-11-06 (Mac)
 
 - After control goes back to the PC, the Mac sends a real 1-point move there and back. Apps such as Terminal hide the pointer while you type until the mouse moves, and that state could keep the Mac's pointer hidden after you switched back.
+- Verified: after the handover the Mac log showed `pointer (Mac in charge): visible on the built-in display`, and the user confirmed that the Mac's own trackpad works without crossing over from Windows first.
 - Diagnostics: while the Mac is in charge, the log records whether the pointer is visible and which display it is on, once per change (`pointer (Mac in charge): …`).
 
 ## 0.5.9 — 2026-11-06 (Mac)
