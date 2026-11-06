@@ -15,9 +15,14 @@ pub struct Displays {
 pub enum Effect {
     /// Move the cursor to x,y (absolute, global points) carrying the raw deltas.
     MoveTo { x: f64, y: f64, dx: f64, dy: f64 },
-    /// Hand control back to the PC at `along` (0..1 along the shared edge).
-    Leave { along: f32 },
+    /// Hand control back to the PC at `along` (0..1 along the shared edge), and leave the Mac's
+    /// cursor at `park`: inside the screen, where it is visible for the Mac's own trackpad (at
+    /// the very edge, macOS draws the arrow off-screen).
+    Leave { along: f32, park: (f64, f64) },
 }
+
+/// How far inside the shared edge the Mac's cursor waits after handing control back.
+const PARK_INSET: f64 = 48.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Active {
@@ -108,8 +113,16 @@ impl Secondary {
                 Side::Bottom => (ny >= r.y + r.h).then(|| (nx - r.x) / r.w),
             };
             if let Some(along) = out {
+                let (x, y) = (nx.clamp(r.x, r.x + r.w - 1.0), ny.clamp(r.y, r.y + r.h - 1.0));
+                let (ix, iy) = (PARK_INSET.min(r.w / 4.0), PARK_INSET.min(r.h / 4.0));
+                let park = match a.side {
+                    Side::Right => (r.x + r.w - ix, y),
+                    Side::Left => (r.x + ix, y),
+                    Side::Top => (x, r.y + iy),
+                    Side::Bottom => (x, r.y + r.h - iy),
+                };
                 self.active = None;
-                return Some(Effect::Leave { along: along.clamp(0.0, 1.0) as f32 });
+                return Some(Effect::Leave { along: along.clamp(0.0, 1.0) as f32, park });
             }
         }
         let x = nx.clamp(r.x, r.x + r.w - 1.0);
@@ -141,7 +154,7 @@ mod tests {
         assert_eq!(m.motion(0, -5000, None), Some(Effect::MoveTo { x: 1716.0, y: 0.0, dx: 0.0, dy: -5000.0 }));
         assert_eq!(m.motion(-5000, 0, None), Some(Effect::MoveTo { x: 0.0, y: 0.0, dx: -5000.0, dy: 0.0 }));
         // the real cursor moved (trackpad) to the far right: next push leaves at its y
-        assert_eq!(m.motion(5, 0, Some((1727.0, 1117.0 / 4.0))), Some(Effect::Leave { along: 0.25 }));
+        assert_eq!(m.motion(5, 0, Some((1727.0, 1117.0 / 4.0))), Some(Effect::Leave { along: 0.25, park: (1680.0, 1117.0 / 4.0) }));
         assert!(!m.is_active());
     }
 
@@ -187,6 +200,6 @@ mod tests {
         m.speed = 0.5;
         m.enter(Mode::Edge, Side::Top, 1.0);
         assert_eq!(m.motion(10, 10, None), Some(Effect::MoveTo { x: 1727.0, y: 6.0, dx: 5.0, dy: 5.0 }));
-        assert_eq!(m.motion(-1000, -20, None), Some(Effect::Leave { along: (1227.0 / 1728.0) as f32 }));
+        assert_eq!(m.motion(-1000, -20, None), Some(Effect::Leave { along: (1227.0 / 1728.0) as f32, park: (1227.0, 48.0) }));
     }
 }

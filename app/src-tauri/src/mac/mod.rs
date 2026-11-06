@@ -251,6 +251,12 @@ fn mirror(on: bool) {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
+            // Leaving monitor mode: the shared monitor shows the PC again, so a cursor left on its
+            // area would be invisible. Put it in the middle of the laptop screen.
+            if let (false, Some(inj), Some((edge, _))) = (on, INJ.get(), sys::layout(&sys::displays())) {
+                let (x, y) = edge.center();
+                inj.lock().unwrap_or_else(|e| e.into_inner()).warp(x, y);
+            }
         }
         Err(e) => {
             status::log(format!("mirror {on} failed: {e}"));
@@ -301,8 +307,9 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
             let effect = sec().motion(dx, dy, os);
             match effect {
                 Some(Effect::MoveTo { x, y, dx, dy }) => inj().move_to(x, y, dx, dy),
-                Some(Effect::Leave { along }) => {
+                Some(Effect::Leave { along, park }) => {
                     inj().release_all();
+                    inj().warp(park.0, park.1); // visible for the Mac's own trackpad
                     let tx = utx.clone();
                     clipboard::hand_over(move |m| drop(tx.send(m)));
                     let _ = utx.send(Msg::Leave { along });

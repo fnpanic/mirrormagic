@@ -58,7 +58,7 @@ async fn full_session() {
     assert_eq!(typed, vec![(0x3D, true), (0x25, true), (0x25, false), (0x3D, false)]);
 
     // 3. pushing right past the Mac's edge hands control back
-    let Some(Effect::Leave { along }) = m.motion(50, 0, None) else { panic!() };
+    let Some(Effect::Leave { along, .. }) = m.motion(50, 0, None) else { panic!() };
     mac_tx.send(&Msg::Leave { along }).await.unwrap();
     let Msg::Leave { along } = pc_rx.recv().await.unwrap() else { panic!() };
     let out = pc.on_leave(along);
