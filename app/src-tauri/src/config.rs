@@ -40,6 +40,9 @@ pub struct Config {
     pub mic: bool,
     /// Set while MirrorMagic mirrors the Mac screen for monitor mode (undone at the next start after a crash).
     pub mirrored: bool,
+    /// Mac: the shared monitor's display while MirrorMagic has its HDMI output off. macOS keeps
+    /// it off after MirrorMagic ends (also on update or crash): the next start turns it on again.
+    pub hdmi_off: Option<u32>,
 }
 
 impl Default for Config {
@@ -64,6 +67,7 @@ impl Default for Config {
             windows_shortcuts: false,
             mic: true,
             mirrored: false,
+            hdmi_off: None,
         }
     }
 }

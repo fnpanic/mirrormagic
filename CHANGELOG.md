@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.13 — 2026-11-06 (Mac)
+
+- **Fix for 0.5.11: monitor mode failed after a MirrorMagic restart.** macOS keeps a display that MirrorMagic switched off off, even after MirrorMagic quits. After the update to 0.5.12, the new instance saw no external display and didn't know its ID. Ctrl+Alt+M then failed with `mirror true failed: no external display connected` (Mac log 18:56:02). Now:
+  - MirrorMagic records the switched-off display in its config (`hdmi_off`).
+  - It turns the display back on when it quits.
+  - At start it turns on a display left off by an earlier run (after an update or crash). Without a record, it tries every display ID that isn't online. The 2 s check then switches it off again while the PC is connected.
+- Verified on the real machines (0.5.11/0.5.12): with the Mac awake, the PC screen was turned off at 18:42 and 18:47. The Mac logged `PC screen off`, but its HDMI output stayed off (no `HDMI output on`, no re-plug), so the monitor had no Mac signal to switch to. Before, at 18:10, the PC found the monitor on HDMI (`monitor input Some(17)`).
+
 ## 0.5.12 — 2026-11-06 (protocol 6)
 
 - **PC microphone and PC speakers in Teams on the Mac, without a driver.** The Mac now has two audio devices, **PC Microphone** and **PC Speakers**; pick them in Teams (Settings → Devices), Zoom or the browser. Before, the microphone needed BlackHole 2ch, which the corporate Mac can't install without admin rights (Mac log: `BlackHole is not installed`), and Mac sound could not reach the PC at all.
@@ -10,7 +18,7 @@
 ## 0.5.11 — 2026-11-06
 
 - **The Mac's HDMI output is off except in monitor mode.** While connected to the PC, MirrorMagic turns the Mac's external display fully off, as if the cable were unplugged. Before, when the PC's screen was asleep and you woke the Mac, the monitor's automatic input detection picked up the Mac's HDMI signal and showed the Mac. The PC switched back only after it woke up itself (PC log of 18:09–18:10: `display off`, then `display on: monitor input Some(17)`). Now the monitor gets no Mac signal at all. **Ctrl+Alt+M** turns the output on, mirrors and switches as before. After switching back, the output goes off again about 5 s later, once the DDC switch over HDMI is done. The Mac re-checks every 2 s, because waking the monitor or re-plugging the cable brings the display back. Mac log: `HDMI output off (display …)` / `HDMI output on (monitor mode)`.
-- Safeguards: the output stays on when the MacBook lid is closed (it is the only screen then). It comes back on when MirrorMagic quits or crashes (macOS undoes the change for the app), and after 5 minutes without a connection to the PC (PC shut down).
+- Safeguards: the output stays on when the MacBook lid is closed (it is the only screen then), and it comes back on after 5 minutes without a connection to the PC (PC shut down). Correction (0.5.13): macOS does *not* undo the change when MirrorMagic ends, despite the "for this app only" option.
 - PC: if the monitor finds no Mac signal yet after the switch and falls back to the PC, the PC switches it to the Mac once more after 4 s (PC log: `monitor went back to the PC before the Mac's HDMI signal was there`).
 - This uses the private macOS call `CGSConfigureDisplayEnabled` (SkyLight, as BetterDisplay does): turning a display off needs no root that way.
 

@@ -94,10 +94,16 @@ extern "C" {
     fn dlsym(handle: *mut c_void, name: *const std::ffi::c_char) -> *mut c_void;
 }
 
-/// Turns a display's output fully off, as if unplugged (what BetterDisplay calls "disconnect"),
-/// or back on. A private SkyLight call: the only way without root. Configured for this app only,
-/// so macOS turns the display back on by itself when MirrorMagic quits or crashes.
-pub fn set_display_enabled(id: u32, on: bool) -> Result<(), String> {
+/// IDs of all connected displays (on or mirroring).
+pub fn online_ids() -> Vec<u32> {
+    online_displays().iter().map(|d| d.id).collect()
+}
+
+/// Turns displays' output fully off, as if unplugged (what BetterDisplay calls "disconnect"),
+/// or back on, in one reconfiguration. A private SkyLight call: the only way without root.
+/// Despite "for this app only", macOS keeps a display off after the app ends (seen on 0.5.11 →
+/// 0.5.12): MirrorMagic records it and turns it on again (config `hdmi_off`).
+pub fn set_display_enabled(ids: &[u32], on: bool) -> Result<(), String> {
     type Enable = unsafe extern "C" fn(*mut c_void, u32, bool) -> i32;
     let f = unsafe {
         let h = dlopen(c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight".as_ptr(), 1);
@@ -111,10 +117,11 @@ pub fn set_display_enabled(id: u32, on: bool) -> Result<(), String> {
     if unsafe { CGBeginDisplayConfiguration(&mut cfg) } != 0 {
         return Err("display config failed".into());
     }
-    let e = unsafe { f(cfg, id, on) };
-    if e != 0 {
+    // unknown ids (probing at start) fail on their own; the others still apply
+    let errs: Vec<i32> = ids.iter().map(|&id| unsafe { f(cfg, id, on) }).filter(|&e| e != 0).collect();
+    if errs.len() == ids.len() {
         unsafe { CGCancelDisplayConfiguration(cfg) };
-        return Err(format!("enable {on}: error {e}"));
+        return Err(format!("enable {on}: errors {errs:?}"));
     }
     match unsafe { CGCompleteDisplayConfiguration(cfg, 0) } {
         0 => Ok(()), // 0 = kCGConfigureForAppOnly

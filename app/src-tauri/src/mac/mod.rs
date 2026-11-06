@@ -77,6 +77,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     T0.get_or_init(Instant::now);
     LAYOUT_GERMAN.store(sys::layout_id().contains("German"), Ordering::Relaxed);
     mirror(false); // undo a mirror left by a crash during monitor mode
+    hdmi_restore();
     let c = config::get();
     let ds = sys::displays();
     let (edge, monitor) = sys::layout(&ds).unwrap_or((mm_core::primary::Rect { x: 0.0, y: 0.0, w: 1440.0, h: 900.0 }, None));
@@ -325,10 +326,11 @@ fn hdmi_off() {
         return;
     }
     let Some(id) = sys::external_display() else { return };
-    let r = sys::set_display_enabled(id, false);
+    let r = sys::set_display_enabled(&[id], false);
     match &r {
         Ok(()) => {
             *HDMI_OFF.lock().unwrap() = Some(id);
+            config::update(|c| c.hdmi_off = Some(id));
             status::log(format!("HDMI output off (display {id}): the monitor gets the Mac's signal only in monitor mode"));
         }
         Err(e) if *LAST_ERR.lock().unwrap() != *e => status::log(format!("HDMI output off failed: {e}")),
@@ -337,10 +339,37 @@ fn hdmi_off() {
     *LAST_ERR.lock().unwrap() = r.err().unwrap_or_default();
 }
 
+/// Start: a display switched off by an earlier run (quit, update, crash) is still off. Turn it on,
+/// so this run knows it; while the PC is connected, the 2 s check switches it off again. Without
+/// a record (versions before 0.5.13, lost config), every id that is not online is tried.
+fn hdmi_restore() {
+    let online = sys::online_ids();
+    let known = config::get().hdmi_off;
+    let ids: Vec<u32> = known.map_or_else(|| (1..=32).collect(), |id| vec![id]).into_iter().filter(|i| !online.contains(i)).collect();
+    if ids.is_empty() || (known.is_none() && sys::external_display().is_some()) {
+        return config::update(|c| c.hdmi_off = None); // nothing was left off
+    }
+    let r = sys::set_display_enabled(&ids, true);
+    for _ in 0..30 {
+        if sys::external_display().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    status::log(format!("start: HDMI output left off by an earlier run? on: {:?} (record {known:?}, result {r:?})", sys::external_display()));
+    config::update(|c| c.hdmi_off = None);
+}
+
+/// MirrorMagic quits: give the Mac its monitor back (macOS would keep it off).
+pub fn shutdown() {
+    hdmi_on("MirrorMagic quits");
+}
+
 /// Monitor mode (or no PC for a while): turn the HDMI output on and wait until it is online.
 fn hdmi_on(why: &str) {
     let Some(id) = HDMI_OFF.lock().unwrap().take() else { return };
-    let r = sys::set_display_enabled(id, true);
+    let r = sys::set_display_enabled(&[id], true);
+    config::update(|c| c.hdmi_off = None);
     for _ in 0..30 {
         if sys::external_display().is_some() {
             break;

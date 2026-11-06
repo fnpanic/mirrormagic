@@ -65,6 +65,14 @@ fn main() {
                 let _ = w.hide();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running MirrorMagic");
+        .build(tauri::generate_context!())
+        .expect("error while running MirrorMagic")
+        .run(|_, e| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Exit = e {
+                mac::shutdown();
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = e;
+        });
 }
