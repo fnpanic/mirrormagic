@@ -580,7 +580,13 @@ fn camera_watch() {
         for pid in lrx.try_iter() {
             // the log works: no need to interrupt calls with frequent probes
             d.probe_every_ms = mm_core::camdemand::PROBE_WITH_LOG_MS;
-            if pid <= 0 {
+            if pid == camlog::UNKNOWN_PID {
+                // macOS hides the PID (<private>) from non-admins: control changed, check now
+                if d.on {
+                    status::log("camera: camera control changed, checking whether anyone still watches");
+                    d.release_hint();
+                }
+            } else if pid <= 0 {
                 if d.on {
                     status::log("camera: an app released a camera, checking whether anyone still watches");
                 }
@@ -709,7 +715,7 @@ fn audio_watch() {
             last = want.clone();
         }
         let active = want != (None, None);
-        let _ = wtx.send(want);
+        wtx.send_replace(want); // `send` drops the value while no stream listens yet
         if active && task.as_ref().is_none_or(|t| t.is_finished()) && status::get().connected && PEER_VERSION.load(Ordering::SeqCst) >= 7 {
             task = Some(RT.get().unwrap().spawn(audio_stream(wtx.subscribe())));
         }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.17 — 2026-11-06 (Mac)
+
+- **PC microphone/speakers stream now.** In the 0.5.16 test call, MirrorMagic noticed the use correctly ("Mikrofon (Jabra Link 390)", "Lautsprecher (Jabra Link 390)"), but the audio connection closed again every second. tokio's `watch::Sender::send` drops the value while no receiver exists, so each new connection saw "nothing in use" and ended. The fix uses `send_replace`.
+- **Camera after a call:** the macOS camera-control events do arrive (`[Microsoft Teams ModuleHost] … setting deviceControlPID <private>`), but macOS hides the PID from non-admin users, so 0.5.13–0.5.16 discarded them. A control change during a call now triggers an immediate check instead of waiting for the 45 s probe. At the end of the 0.5.16 test call no such event arrived (the camera went off at the 45 s probe, about 25 s after the call). This version therefore logs every distinct kind of CoreMediaIO message that mentions a PID, to find the end-of-call signal.
+- 0.5.16: the camera-control log follower records `log stream` errors and the raw lines it can't parse.
+
 ## 0.5.15 — 2026-11-06 (Mac)
 
 - **Monitor mode: the screen no longer goes black after a while.** Input that MirrorMagic posts on the Mac (CGEvents) doesn't count as user activity for the macOS display-sleep timer. While the user worked through the PC keyboard and mouse, the Mac put its display to sleep after its timeout (monitor mode 19:25–19:41, black in between). Now, while the PC controls the Mac, MirrorMagic reports user activity to macOS at most every 5 s (`IOPMAssertionDeclareUserActivity`), as real input does.
