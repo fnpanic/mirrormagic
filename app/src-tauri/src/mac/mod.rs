@@ -581,9 +581,8 @@ fn camera_watch() {
             // the log works: no need to interrupt calls with frequent probes
             d.probe_every_ms = mm_core::camdemand::PROBE_WITH_LOG_MS;
             if pid == camlog::UNKNOWN_PID {
-                // macOS hides the PID (<private>) from non-admins: control changed, check now
                 if d.on {
-                    status::log("camera: camera control changed, checking whether anyone still watches");
+                    status::log("camera: an app stopped reading the OBS camera, checking whether anyone still watches");
                     d.release_hint();
                 }
             } else if pid <= 0 {
@@ -701,8 +700,19 @@ fn audio_watch() {
             let (inputs, outputs) = list.clone().unwrap();
             let mut devs = AUDIO_DEVS.lock().unwrap();
             drop(devs.take()); // the PC's list changed: offer the new one
-            let (d, log) = vaudio::create(me, &inputs, &outputs);
+            let (mut d, log) = vaudio::create(me, &inputs, &outputs, false);
             status::log(format!("audio devices: {log:?}"));
+            // does sound played into the tap come out of a "– PC" microphone? (Teams heard nothing)
+            if let Some((_, pc)) = d.mics.first().cloned() {
+                let peak = mic_selftest(&pc);
+                status::log(format!("audio self-test: tone into {pc} – PC, read back peak {peak}/32768"));
+                if peak < 100 {
+                    drop(d);
+                    let (d2, log) = vaudio::create(me, &inputs, &outputs, true);
+                    d = d2;
+                    status::log(format!("audio devices with the speakers as clock: {log:?}; self-test peak {}/32768", mic_selftest(&pc)));
+                }
+            }
             (mics, speakers) = (d.mics.clone(), d.speakers.clone());
             *devs = Some(d);
             offered = list;
@@ -720,6 +730,30 @@ fn audio_watch() {
             task = Some(RT.get().unwrap().spawn(audio_stream(wtx.subscribe())));
         }
     }
+}
+
+/// Plays a 1 s tone the way the PC microphone is played (into the muted tap on this process) and
+/// reads it back from the Mac device of PC input `pc`. Returns the peak level read.
+fn mic_selftest(pc: &str) -> u16 {
+    let peak = Arc::new(std::sync::atomic::AtomicU16::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let p = peak.clone();
+    let r = crate::audio::capture(Some(format!("{pc} – PC")), stop.clone(), move |_, pcm| {
+        p.fetch_max(pcm.iter().map(|x| x.unsigned_abs()).max().unwrap_or(0), Ordering::Relaxed);
+    });
+    if let Err(e) = r {
+        status::log(format!("audio self-test: cannot read {pc} – PC: {e}"));
+        return 0;
+    }
+    let mut player = crate::audio::Player::default();
+    for i in 0..150 {
+        let tone: Vec<i16> = (0..480).map(|n| ((((i * 480 + n) as f32) * 440.0 * std::f32::consts::TAU / 48000.0).sin() * 8000.0) as i16).collect();
+        player.push(48000, tone);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    stop.store(true, Ordering::SeqCst);
+    player.stop();
+    peak.load(Ordering::Relaxed)
 }
 
 /// One audio connection to the PC while a PC device is used: plays the PC microphone through

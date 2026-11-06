@@ -8,7 +8,8 @@ use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
 
-/// Sent when a control event's PID is hidden (`<private>`: macOS redacts it for non-admins).
+/// Sent when an app stops reading OBS's virtual camera (the PID is hidden: `<private>` for
+/// non-admins).
 pub const UNKNOWN_PID: i64 = i64::MIN;
 
 /// Starts `log stream` and sends every control PID it reports.
@@ -50,8 +51,9 @@ pub fn follow(tx: Sender<i64>) {
             if seen.len() < 200 && seen.insert(kind) {
                 crate::status::log(format!("camera log: [{who}] {}", msg.chars().take(300).collect::<String>().replace('\n', " ")));
             }
-            let control = msg.to_ascii_lowercase().contains("controlpid");
-            let Some(pid) = parse_control_pid(msg).or(control.then_some(UNKNOWN_PID)) else { continue };
+            // OBS's camera extension: an app stopped reading the virtual camera (end of a call)
+            let left = msg.contains("removeStreamingClient") && msg.contains("Stream Source");
+            let Some(pid) = parse_control_pid(msg).or(left.then_some(UNKNOWN_PID)) else { continue };
             if tx.send(pid).is_err() {
                 break;
             }

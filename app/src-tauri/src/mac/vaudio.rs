@@ -180,7 +180,9 @@ pub fn reader_name(pc: &str) -> String {
 
 /// One Mac device per PC input and output; `me` is this process's audio object. Each device
 /// fails on its own.
-pub fn create(me: u32, inputs: &[String], outputs: &[String]) -> (Devices, Vec<String>) {
+/// `clock`: give each PC input the real output as clock device (Apple's tap sample does this;
+/// without it the input may stay silent).
+pub fn create(me: u32, inputs: &[String], outputs: &[String], clock: bool) -> (Devices, Vec<String>) {
     let mut d = Devices { mics: vec![], speakers: vec![], taps: vec![], devs: vec![] };
     let mut log = vec![];
     destroy_stale(&mut log);
@@ -192,7 +194,8 @@ pub fn create(me: u32, inputs: &[String], outputs: &[String]) -> (Devices, Vec<S
         let r = tap(false, &[me], None, &format!("MirrorMagic {pc}")).and_then(|(t, tuid)| {
             d.taps.push(t);
             let uid = format!("{UID}in.{pc}");
-            aggregate(&mac_name(pc), &uid, false, None, Some(&tuid)).or_else(|_| aggregate(&mac_name(pc), &format!("{uid}.2"), false, out.as_deref(), Some(&tuid)))
+            let first = if clock { out.as_deref() } else { None };
+            aggregate(&mac_name(pc), &uid, false, first, Some(&tuid)).or_else(|_| aggregate(&mac_name(pc), &format!("{uid}.2"), false, out.as_deref(), Some(&tuid)))
         });
         match r {
             Ok(id) => {

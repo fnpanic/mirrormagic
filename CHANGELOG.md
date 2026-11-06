@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.18 — 2026-11-06 (Mac)
+
+- **Camera off right after the call.** The 0.5.17 test call showed the end-of-call signal. OBS's camera extension logs `Stream Source … removing streaming client` when an app stops reading the virtual camera (20:06:54, the moment the call ended). MirrorMagic now checks immediately on that line and turns the PC camera off. In 0.5.17 the camera stayed on: the redacted control events made MirrorMagic believe the log worked, which stretched the safety probe to 10 minutes.
+- **PC microphone in Teams:** in the 0.5.17 test the speaker side worked (the user heard the call on the PC), and the PC microphone reached the Mac at a good level (peak 21303/32768). But Teams showed no level on "Mikrofon (Jabra Link 390) – PC". At start, MirrorMagic now plays a 1 s tone into the tap and reads it back from that device (`audio self-test: … peak …`). If the read-back is silent, it rebuilds the "– PC" microphones with the real output as clock device (as Apple's tap sample does) and tests again.
+
 ## 0.5.17 — 2026-11-06 (Mac)
 
 - **PC microphone/speakers stream now.** In the 0.5.16 test call, MirrorMagic noticed the use correctly ("Mikrofon (Jabra Link 390)", "Lautsprecher (Jabra Link 390)"), but the audio connection closed again every second. tokio's `watch::Sender::send` drops the value while no receiver exists, so each new connection saw "nothing in use" and ended. The fix uses `send_replace`.
