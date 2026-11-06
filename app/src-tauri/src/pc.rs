@@ -109,6 +109,17 @@ pub fn on_move(x: f64, y: f64) -> bool {
         // shift it, and deltas from the stored park point would then carry that shift forever:
         // the Mac cursor got pulled left or right on its own.
         if let Some((cx, cy)) = win::cursor_pos() {
+            let (px, py) = p.park();
+            if (cx - px).abs() + (cy - py).abs() >= 2.0 {
+                // evidence in the log: without this correction, the offset would pull the Mac cursor
+                static LOGGED: AtomicU64 = AtomicU64::new(0);
+                let now = T0.get().unwrap().elapsed().as_secs() + 60;
+                if now - LOGGED.load(Ordering::Relaxed) >= 60 {
+                    LOGGED.store(now, Ordering::Relaxed);
+                    let d = (cx - px, cy - py);
+                    std::thread::spawn(move || status::log(format!("hidden cursor slipped by {:.0},{:.0} px: corrected (would have pulled the Mac cursor)", d.0, d.1)));
+                }
+            }
             p.set_park(cx, cy);
         }
     }

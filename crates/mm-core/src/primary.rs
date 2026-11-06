@@ -324,6 +324,10 @@ impl Primary {
         self.mods.mods()
     }
 
+    pub fn park(&self) -> (f64, f64) {
+        self.park
+    }
+
     pub fn set_park(&mut self, x: f64, y: f64) {
         self.park = (x, y);
     }

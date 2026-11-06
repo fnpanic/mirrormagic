@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.8 — 2026-11-06 (PC only)
+
+- Diagnostics for the 0.5.6 drift fix: when the PC's hidden cursor has slipped off its park point while you control the Mac, the log says `hidden cursor slipped by x,y px: corrected (would have pulled the Mac cursor)`, at most once a minute. Each such line is a pull that 0.5.5 and earlier would have shown on the Mac.
+
 ## 0.5.7 — 2026-11-06
 
 - **The PC screen stays on while you work on the Mac with its own keyboard and trackpad.** Windows saw no input and turned its screen off after its timeout. The monitor's auto input detection then jumped to the Mac's HDMI signal and showed the Mac's second screen while you were working on the MacBook. While the Mac has input, it now tells the PC every 30 s (protocol 5), and the PC resets its display timer. When you are away from both, the PC screen turns off as usual, and the Mac puts its displays to sleep after 60 s (0.5.6). The away test of 0.5.6 showed the gap: the Mac received "PC screen off" but was in use, so it rightly kept its displays on.
