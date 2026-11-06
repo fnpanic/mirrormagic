@@ -373,7 +373,8 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
         Channel::Control => control(tx, rx, name, addr.ip().to_string()).await,
         Channel::Camera => camera_channel(tx, rx).await,
         Channel::Files => files_channel(tx, rx).await,
-        Channel::Audio => audio_channel(tx, rx).await,
+        Channel::Audio if agreed >= 7 => audio_channel(tx, rx).await,
+        Channel::Audio => Err("audio needs MirrorMagic 0.5.14 on both sides".into()),
     }
 }
 
@@ -388,6 +389,15 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
         s.last_error.clear();
     });
     // input is handed over only once the Mac reports it can inject (PeerInfo, Accessibility granted)
+    if PEER_VERSION.load(Ordering::SeqCst) >= 7 {
+        // the Mac offers each PC microphone and speaker to its apps under its own name
+        let utx = utx.clone();
+        tokio::task::spawn_blocking(move || {
+            let (inputs, outputs) = crate::audio::devices();
+            status::log(format!("audio: offering {inputs:?} / {outputs:?} to the Mac"));
+            let _ = utx.send(Msg::AudioDevices { inputs, outputs });
+        });
+    }
 
     let writer = tokio::spawn(async move {
         while let Some(m) = urx.recv().await {
@@ -486,19 +496,17 @@ static AUD_TX: Mutex<Option<mpsc::Sender<Msg>>> = Mutex::new(None);
 /// Stops the running microphone capture.
 static MIC_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = Mutex::new(None);
 
-/// The PC microphone streams while an app on the Mac records from "PC Microphone".
-fn mic_wanted(on: bool) {
+/// A PC microphone (by name) streams while an app on the Mac records from its Mac device.
+fn mic_wanted(on: Option<String>) {
     let mut m = MIC_STOP.lock().unwrap();
     if let Some(stop) = m.take() {
         stop.store(true, Ordering::SeqCst);
     }
-    if !on || !config::get().mic {
-        return;
-    }
+    let Some(device) = on.filter(|_| config::get().mic) else { return };
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     *m = Some(stop.clone());
     std::thread::spawn(move || {
-        let r = crate::audio::capture(None, stop, |rate, pcm| {
+        let r = crate::audio::capture(Some(device), stop, |rate, pcm| {
             if let Some(tx) = AUD_TX.lock().unwrap().as_ref() {
                 let _ = tx.try_send(Msg::Audio { rate, pcm });
             }
@@ -584,18 +592,19 @@ async fn audio_channel(mut tx: secure::Sender, rx: secure::Receiver) -> Result<(
     let me = AUD_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
     *AUD_TX.lock().unwrap() = Some(atx);
     let mut speaker = crate::audio::Player::default();
-    let mut want = (false, false);
+    let mut want: (Option<String>, Option<String>) = (None, None);
     let r = loop {
         tokio::select! {
             a = arx.recv() => if let Some(m) = a { if let Err(e) = tx.send(&m).await { break Err(e) } },
             m = rx.recv() => match m.unwrap_or(Err("closed".into())) {
                 Ok(Msg::AudioWant { mic, speaker: spk }) => {
-                    if want != (mic, spk) {
-                        status::log(format!("audio: Mac uses PC microphone {mic}, PC speakers {spk}"));
+                    if want != (mic.clone(), spk.clone()) {
+                        status::log(format!("audio: Mac uses microphone {mic:?}, speakers {spk:?}"));
                         if want.0 != mic {
-                            mic_wanted(mic);
+                            mic_wanted(mic.clone());
                         }
-                        if !spk {
+                        speaker.set_device(spk.clone());
+                        if spk.is_none() {
                             speaker.stop();
                         }
                         want = (mic, spk);
@@ -614,8 +623,8 @@ async fn audio_channel(mut tx: secure::Sender, rx: secure::Receiver) -> Result<(
     reader.abort();
     if AUD_CHAN.load(Ordering::SeqCst) == me {
         *AUD_TX.lock().unwrap() = None;
-        if want.0 {
-            mic_wanted(false);
+        if want.0.is_some() {
+            mic_wanted(None);
         }
     }
     r

@@ -19,7 +19,7 @@ OBS's virtual camera stays **off** while no app uses it, because macOS counts OB
 
 ## PC microphone and speakers
 
-MirrorMagic adds two audio devices on the Mac (macOS 14.2 or later, no driver or admin rights needed): **PC Microphone** and **PC Speakers**. Pick them in Teams (Settings → Devices → Audio devices: custom), Zoom or the browser. On first use, macOS asks whether MirrorMagic may record system audio: allow it (System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only). The devices exist while MirrorMagic runs. Mac log: `audio devices: [...]`, `audio: an app uses PC Microphone …`, `audio: connected`. PC log: `audio: Mac uses PC microphone …`.
+MirrorMagic offers each PC microphone and speaker on the Mac (macOS 14.2 or later, no driver or admin rights needed) as "<PC device name> – PC". Teams adds "(Aggregate)". Pick them in Teams (Settings → Devices), Zoom or the browser. The list comes from the PC when the Mac connects. On first use, macOS asks whether MirrorMagic may record system audio: allow it (System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording Only). The devices exist while MirrorMagic runs. Mac log: `audio devices: [...]`, `audio: PC offers …`, `audio: Mac apps use PC microphone …`, `audio: connected`. PC log: `audio: Mac uses PC microphone …`.
 
 ## Building on the Mac (no CI)
 

@@ -510,6 +510,10 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                 }
             });
         }
+        Msg::AudioDevices { inputs, outputs } => {
+            status::log(format!("audio: PC offers {inputs:?} / {outputs:?}"));
+            *PC_AUDIO.lock().unwrap() = Some((inputs, outputs));
+        }
         Msg::PcDisplay { on } => {
             status::log(format!("PC screen {}", if on { "on" } else { "off" }));
             PC_DISPLAY_OFF.store(!on, Ordering::SeqCst);
@@ -652,19 +656,23 @@ async fn camera_stream() {
     }
 }
 
-// ---------------------------------------------------------------- PC microphone / speakers
+// ---------------------------------------------------------------- PC microphones / speakers
 
 /// The audio devices; removed on quit (coreaudiod would keep them, with a dead tap).
 static AUDIO_DEVS: Mutex<Option<vaudio::Devices>> = Mutex::new(None);
+/// The PC's audio devices (inputs, outputs) as last reported; the Mac offers each one.
+static PC_AUDIO: Mutex<Option<(Vec<String>, Vec<String>)>> = Mutex::new(None);
 
-/// Provides "PC Microphone" and "PC Speakers" (vaudio.rs) and connects them to the PC while an
-/// app on the Mac uses them.
+type Want = (Option<String>, Option<String>);
+
+/// Offers the PC's microphones and speakers as Mac devices (vaudio.rs) and connects one to the
+/// PC while an app on the Mac uses it.
 fn audio_watch() {
     // a process is a Core Audio object only once it has talked to the audio system
     let mut me = vaudio::own_process_object();
     if me == 0 {
         let stop = Arc::new(AtomicBool::new(false));
-        let r = crate::audio::play(48000, stop.clone());
+        let r = crate::audio::play(48000, None, stop.clone());
         std::thread::sleep(Duration::from_millis(300));
         stop.store(true, Ordering::SeqCst);
         me = vaudio::own_process_object();
@@ -672,68 +680,72 @@ fn audio_watch() {
             return status::log(format!("audio devices: no Core Audio process object ({:?})", r.err()));
         }
     }
-    let (devs, log) = vaudio::create(me);
-    status::log(format!("audio devices: {log:?}"));
-    let (mic, speaker) = (devs.mic, devs.speaker);
-    *AUDIO_DEVS.lock().unwrap() = Some(devs);
-    let (wtx, _) = watch::channel((false, false));
+    let (wtx, _) = watch::channel::<Want>((None, None));
     let mut task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut last = (false, false);
+    let mut offered = None;
+    let (mut mics, mut speakers) = (vec![], vec![]);
+    let mut last: Want = (None, None);
     loop {
         std::thread::sleep(Duration::from_secs(1));
-        let want = (
-            mic.is_some_and(|d| vaudio::used_by_others(d, true, me)),
-            speaker.is_some_and(|d| vaudio::used_by_others(d, false, me)),
-        );
-        if want != last {
-            status::log(format!("audio: an app uses PC Microphone {}, PC Speakers {}", want.0, want.1));
-            status::update(|s| s.mic_detail = format!("PC Microphone {}, PC Speakers {}", if want.0 { "in use" } else { "ready" }, if want.1 { "in use" } else { "ready" }));
-            last = want;
+        let list = PC_AUDIO.lock().unwrap().clone();
+        if list.is_some() && list != offered {
+            let (inputs, outputs) = list.clone().unwrap();
+            let mut devs = AUDIO_DEVS.lock().unwrap();
+            drop(devs.take()); // the PC's list changed: offer the new one
+            let (d, log) = vaudio::create(me, &inputs, &outputs);
+            status::log(format!("audio devices: {log:?}"));
+            (mics, speakers) = (d.mics.clone(), d.speakers.clone());
+            *devs = Some(d);
+            offered = list;
         }
+        let used = |l: &[(u32, String)], input| l.iter().find(|(d, _)| vaudio::used_by_others(*d, input, me)).map(|x| x.1.clone());
+        let want: Want = (used(&mics, true), used(&speakers, false));
+        if want != last {
+            status::log(format!("audio: Mac apps use PC microphone {:?}, PC speakers {:?}", want.0, want.1));
+            status::update(|s| s.mic_detail = format!("{} · {}", want.0.as_deref().unwrap_or("no PC microphone in use"), want.1.as_deref().unwrap_or("no PC speakers in use")));
+            last = want.clone();
+        }
+        let active = want != (None, None);
         let _ = wtx.send(want);
-        if want != (false, false) && task.as_ref().is_none_or(|t| t.is_finished()) && status::get().connected {
-            if PEER_VERSION.load(Ordering::SeqCst) < 6 {
-                continue; // the PC's MirrorMagic is too old for the audio channel
-            }
+        if active && task.as_ref().is_none_or(|t| t.is_finished()) && status::get().connected && PEER_VERSION.load(Ordering::SeqCst) >= 7 {
             task = Some(RT.get().unwrap().spawn(audio_stream(wtx.subscribe())));
         }
     }
 }
 
-/// One audio connection to the PC while (mic, speakers) are wanted: plays the PC microphone into
-/// "PC Microphone" (through the muted tap on this process) and sends "PC Speakers" sound to the PC.
-async fn audio_stream(mut want: watch::Receiver<(bool, bool)>) {
+/// One audio connection to the PC while a PC device is used: plays the PC microphone through
+/// the muted taps on this process, and sends what apps play to a PC output to the PC.
+async fn audio_stream(mut want: watch::Receiver<Want>) {
     let Ok((mut tx, rx, _, _)) = open(Channel::Audio).await.map_err(|e| status::log(format!("audio: {e}"))) else { return };
     status::log("audio: connected");
     let (reader, mut rx) = crate::audio::reader(rx);
     let (ctx, mut crx) = mpsc::channel::<Msg>(64);
-    let mut capture: Option<Arc<AtomicBool>> = None;
+    let mut capture: Option<(String, Arc<AtomicBool>)> = None;
     let mut player = crate::audio::Player::default();
-    let mut sent = None;
+    let mut sent: Option<Want> = None;
     let r: Result<(), secure::Error> = loop {
-        let w = *want.borrow_and_update();
-        if sent != Some(w) {
-            if w == (false, false) {
+        let w = want.borrow_and_update().clone();
+        if sent.as_ref() != Some(&w) {
+            if w == (None, None) {
                 break Ok(());
             }
-            if let Err(e) = tx.send(&Msg::AudioWant { mic: w.0, speaker: w.1 }).await {
+            if let Err(e) = tx.send(&Msg::AudioWant { mic: w.0.clone(), speaker: w.1.clone() }).await {
                 break Err(e);
             }
-            if w.1 && capture.is_none() {
-                let stop = Arc::new(AtomicBool::new(false));
-                let (s, ctx) = (stop.clone(), ctx.clone());
-                let r = tokio::task::spawn_blocking(move || {
-                    crate::audio::capture(Some(vaudio::SPEAKER_TAP_NAME), s, move |rate, pcm| drop(ctx.try_send(Msg::Audio { rate, pcm })))
-                })
-                .await;
-                status::log(format!("audio: PC Speakers capture: {r:?}"));
-                capture = Some(stop);
-            } else if !w.1 {
-                if let Some(s) = capture.take() {
+            // read the tap of the PC output in use (switch when the app picks another one)
+            if capture.as_ref().map(|c| &c.0) != w.1.as_ref() {
+                if let Some((_, s)) = capture.take() {
                     s.store(true, Ordering::SeqCst);
                 }
+                if let Some(pc) = w.1.clone() {
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let (s, ctx, dev) = (stop.clone(), ctx.clone(), vaudio::reader_name(&pc));
+                    let r = tokio::task::spawn_blocking(move || crate::audio::capture(Some(dev), s, move |rate, pcm| drop(ctx.try_send(Msg::Audio { rate, pcm })))).await;
+                    status::log(format!("audio: sound for {pc} from the tap: {r:?}"));
+                    capture = Some((pc, stop));
+                }
             }
-            if !w.0 {
+            if w.0.is_none() {
                 player.stop();
             }
             sent = Some(w);
@@ -743,7 +755,7 @@ async fn audio_stream(mut want: watch::Receiver<(bool, bool)>) {
             m = crx.recv() => if let Some(m) = m { if let Err(e) = tx.send(&m).await { break Err(e) } },
             m = rx.recv() => match m.unwrap_or(Err("closed".into())) {
                 Ok(Msg::Audio { rate, pcm }) => if let Some(r) = player.push(rate, pcm) {
-                    status::log(format!("audio: PC microphone at {rate} Hz into PC Microphone: {r:?}"));
+                    status::log(format!("audio: PC microphone at {rate} Hz: {r:?}"));
                 },
                 Ok(_) => {}
                 Err(e) => break Err(e),
@@ -751,7 +763,7 @@ async fn audio_stream(mut want: watch::Receiver<(bool, bool)>) {
         }
     };
     reader.abort();
-    if let Some(s) = capture {
+    if let Some((_, s)) = capture {
         s.store(true, Ordering::SeqCst);
     }
     status::log(format!("audio: ended {r:?}"));

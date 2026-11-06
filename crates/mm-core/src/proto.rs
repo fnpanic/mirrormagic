@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
-pub const PROTOCOL_VERSION: u32 = 6; // 3: clipboard files, 4: PcDisplay, 5: MacActive, 6: audio channel
+pub const PROTOCOL_VERSION: u32 = 7; // 3: clipboard files, 4: PcDisplay, 5: MacActive, 7: audio (6 was a short-lived draft)
 /// Oldest peer version still understood: newer versions only append messages, so the PC answers
 /// with the lower of both versions and never sends a peer messages it does not know.
 pub const MIN_COMPATIBLE_VERSION: u32 = 2;
@@ -129,8 +129,11 @@ pub enum Msg {
     /// Control, Mac → PC: someone uses the Mac right now (input within the last 30 s). The PC
     /// keeps its screen awake, so the monitor does not fall back to the Mac's HDMI signal.
     MacActive,
-    /// Audio channel, Mac → PC: which of the PC's audio devices Mac apps use right now.
-    AudioWant { mic: bool, speaker: bool },
+    /// Audio channel, Mac → PC: which PC input / output Mac apps use right now (device names
+    /// from `AudioDevices`; None = not used).
+    AudioWant { mic: Option<String>, speaker: Option<String> },
+    /// Control, PC → Mac: the PC's audio devices; the Mac offers each one to its apps.
+    AudioDevices { inputs: Vec<String>, outputs: Vec<String> },
 }
 
 pub fn encode(msg: &Msg) -> Vec<u8> {

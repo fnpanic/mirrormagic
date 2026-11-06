@@ -7,7 +7,7 @@ Share the Windows PC's keyboard, mouse, monitor, clipboard and webcam with a Mac
 | Push the pointer past the configured screen edge | Mouse and keyboard control the Mac (its built-in screen sits next to the monitor). Push it back to return. |
 | Press **Ctrl+Alt+M** | The shared monitor switches to the Mac's HDMI input (DDC/CI) and shows the Mac's **main screen** at the monitor's full native resolution (the MacBook screen mirrors the monitor while monitor mode is on). Mouse and keyboard move to the Mac. Press again to switch back. Outside monitor mode the Mac keeps its HDMI output off, so the monitor never shows the Mac by itself (for example when the PC screen is asleep and you wake the Mac). |
 | Switch either way | The clipboard comes with you: text, formatted text (HTML), images and **files/folders** (copy in Explorer, paste in Finder, and the other way round). Clipboard managers on both sides record it. |
-| Pick "PC Microphone" / "PC Speakers" in Teams/Zoom/a browser on the Mac | The PC's microphone becomes the Mac app's microphone, and the call's sound plays on the PC. Audio streams only while an app uses one of the two devices. |
+| Pick a "… – PC" microphone / speaker in Teams/Zoom/a browser on the Mac | That PC microphone becomes the Mac app's microphone, and the call's sound plays on that PC speaker. Audio streams only while an app uses one of the two devices. |
 | Open "OBS Virtual Camera" in Teams/Zoom/a browser on the Mac | The PC's webcam turns on and streams to the Mac. It runs only while an app uses the camera and turns off within a minute after the call (it follows the macOS camera-control log, so calls are not interrupted). |
 | Press **Scroll Lock** | Emergency exit: control returns to the PC at once. |
 
@@ -22,7 +22,7 @@ Windows is the primary side (it owns keyboard, mouse and webcam). The Mac connec
 2. Allow **Accessibility** when macOS asks (Privacy & Security). Without it the Mac can't be controlled.
 3. Allow **Local Network** when macOS asks.
 4. For the camera: install [OBS Studio](https://obsproject.com) and allow its camera extension when macOS asks; MirrorMagic configures OBS by itself. Then pick "OBS Virtual Camera" in your apps.
-5. For calls: pick **PC Microphone** and **PC Speakers** in Teams, Zoom or the browser (macOS 14.2+, no driver needed). They pass the PC's microphone to the Mac and play the call on the PC. Allow "System Audio Recording" once when macOS asks.
+5. For calls: every PC microphone and speaker appears on the Mac as "<name> – PC" (macOS 14.2+, no driver needed). Pick them in Teams, Zoom or the browser, e.g. "Mikrofon (Jabra Link 390) – PC" and "Lautsprecher (Jabra Link 390) – PC". Allow "System Audio Recording" once when macOS asks.
 
 ## Settings (PC)
 

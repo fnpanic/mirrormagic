@@ -1,11 +1,12 @@
-//! "PC Microphone" and "PC Speakers" as audio devices on the Mac, without a driver (corporate
-//! Macs can't install BlackHole without admin rights). Built from Core Audio taps (macOS 14.2+):
-//! - PC Microphone: a public aggregate device whose input is a muted tap on MirrorMagic itself.
-//!   MirrorMagic plays the PC microphone to the default output; the tap mutes it there and hands
-//!   it to whoever records from "PC Microphone" (Teams, Zoom, a browser).
-//! - PC Speakers: a public aggregate device around the real speakers. A muted tap on its output
+//! The PC's microphones and speakers as audio devices on the Mac, one per PC device ("Mikrofon
+//! (Jabra Link 390) – PC"), without a driver (corporate Macs can't install BlackHole without admin
+//! rights). Built from Core Audio taps (macOS 14.2+):
+//! - PC input: a public aggregate device whose input is a muted tap on MirrorMagic itself.
+//!   MirrorMagic plays that PC microphone to the default output; the tap mutes it there and hands
+//!   it to whoever records from the device (Teams, Zoom, a browser).
+//! - PC output: a public aggregate device around the real speakers. A muted tap on its output
 //!   (all processes but MirrorMagic) silences it on the Mac; MirrorMagic reads that tap through a
-//!   private aggregate ("MirrorMagic speaker tap") and sends the sound to the PC.
+//!   private aggregate ("MirrorMagic tap: …") and the PC plays it on that output.
 //! The first tap read makes macOS ask for "System Audio Recording" permission.
 use core_foundation::array::CFArray;
 use core_foundation::base::{CFType, TCFType};
@@ -17,10 +18,6 @@ use objc2_core_audio::{CATapDescription, CATapMuteBehavior};
 use objc2_foundation::{NSArray, NSNumber, NSString};
 use std::ffi::c_void;
 
-pub const MIC_NAME: &str = "PC Microphone";
-pub const SPEAKER_NAME: &str = "PC Speakers";
-/// Private aggregate that only MirrorMagic sees; cpal opens it by this name.
-pub const SPEAKER_TAP_NAME: &str = "MirrorMagic speaker tap";
 
 #[repr(C)]
 struct Addr {
@@ -139,10 +136,12 @@ fn aggregate(name: &str, uid: &str, private: bool, sub: Option<&str>, tap: Optio
     Ok(id)
 }
 
-/// The devices while they exist; destroyed on drop (macOS also removes them when the app ends).
+/// The devices while they exist; destroyed on drop (coreaudiod would keep them, with a dead tap).
 pub struct Devices {
-    pub mic: Option<u32>,
-    pub speaker: Option<u32>,
+    /// (device, PC input name)
+    pub mics: Vec<(u32, String)>,
+    /// (device, PC output name)
+    pub speakers: Vec<(u32, String)>,
     taps: Vec<u32>,
     devs: Vec<u32>,
 }
@@ -158,69 +157,72 @@ impl Drop for Devices {
     }
 }
 
-const UIDS: [&str; 5] = ["app.mirrormagic.mic", "app.mirrormagic.mic2", "app.mirrormagic.speakers", "app.mirrormagic.spktap", "app.mirrormagic.spktap2"];
+const UID: &str = "app.mirrormagic.";
 
 /// Public aggregate devices outlive the process that made them (coreaudiod keeps them), with a
-/// dead tap inside: remove the ones an earlier run left.
+/// dead tap inside: remove every one of ours an earlier run left.
 fn destroy_stale(log: &mut Vec<String>) {
-    for uid in UIDS {
-        let q = CFString::new(uid);
-        let r = q.as_concrete_TypeRef();
-        let a = Addr { selector: cc(b"uidd"), scope: GLOBAL, element: 0 };
-        let (mut id, mut size) = (0u32, 4u32);
-        let qp = &r as *const CFStringRef as *const c_void;
-        let ok = unsafe { AudioObjectGetPropertyData(SYSTEM, &a, std::mem::size_of::<CFStringRef>() as u32, qp, &mut size, &mut id as *mut u32 as *mut c_void) } == 0;
-        if ok && id != 0 {
+    for id in list(SYSTEM, cc(b"dev#"), GLOBAL) {
+        if let Some(uid) = device_uid(id).filter(|u| u.starts_with(UID)) {
             let e = unsafe { AudioHardwareDestroyAggregateDevice(id) };
             log.push(format!("removed stale {uid} (device {id}): {e}"));
         }
     }
 }
 
-/// Creates both devices; `me` is this process's audio object. Each half fails on its own.
-pub fn create(me: u32) -> (Devices, Vec<String>) {
-    let mut d = Devices { mic: None, speaker: None, taps: vec![], devs: vec![] };
+/// What a PC device is called on the Mac (Teams adds "(Aggregate)").
+fn mac_name(pc: &str) -> String {
+    format!("{pc} – PC")
+}
+
+/// The private device MirrorMagic reads a PC output's sound from.
+pub fn reader_name(pc: &str) -> String {
+    format!("MirrorMagic tap: {pc}")
+}
+
+/// One Mac device per PC input and output; `me` is this process's audio object. Each device
+/// fails on its own.
+pub fn create(me: u32, inputs: &[String], outputs: &[String]) -> (Devices, Vec<String>) {
+    let mut d = Devices { mics: vec![], speakers: vec![], taps: vec![], devs: vec![] };
     let mut log = vec![];
     destroy_stale(&mut log);
-    // the real output to play through: the default output at start, unless it is ours
-    let out = get::<u32>(SYSTEM, cc(b"dOut"), None).and_then(device_uid).filter(|u| !u.starts_with("app.mirrormagic"));
+    // the real output to play through: the default output, unless it is ours
+    let out = get::<u32>(SYSTEM, cc(b"dOut"), None).and_then(device_uid).filter(|u| !u.starts_with(UID));
 
-    // PC Microphone: tap on this process (muted), no output of its own
-    let mic = tap(false, &[me], None, "MirrorMagic PC microphone").and_then(|(t, tuid)| {
-        d.taps.push(t);
-        aggregate(MIC_NAME, "app.mirrormagic.mic", false, None, Some(&tuid))
-            .or_else(|e| {
-                log.push(format!("{e}, retrying with the speakers as clock"));
-                aggregate(MIC_NAME, "app.mirrormagic.mic2", false, out.as_deref(), Some(&tuid))
-            })
-    });
-    match mic {
-        Ok(id) => {
-            d.devs.push(id);
-            d.mic = Some(id);
-            log.push(format!("{MIC_NAME}: device {id}"));
+    // PC input: a muted tap on this process, which plays that PC microphone while it is used
+    for pc in inputs {
+        let r = tap(false, &[me], None, &format!("MirrorMagic {pc}")).and_then(|(t, tuid)| {
+            d.taps.push(t);
+            let uid = format!("{UID}in.{pc}");
+            aggregate(&mac_name(pc), &uid, false, None, Some(&tuid)).or_else(|_| aggregate(&mac_name(pc), &format!("{uid}.2"), false, out.as_deref(), Some(&tuid)))
+        });
+        match r {
+            Ok(id) => {
+                d.devs.push(id);
+                d.mics.push((id, pc.clone()));
+            }
+            Err(e) => log.push(format!("{pc}: {e}")),
         }
-        Err(e) => log.push(format!("{MIC_NAME} failed: {e}")),
     }
 
-    // PC Speakers: aggregate around the real output, its output tapped (muted) for the PC
-    let spk = out.ok_or_else(|| "no default output".to_string()).and_then(|out| {
-        let uid = "app.mirrormagic.speakers";
-        let dev = aggregate(SPEAKER_NAME, uid, false, Some(&out), None)?;
-        d.devs.push(dev);
-        let (t, tuid) = tap(true, &[me], Some(uid), "MirrorMagic PC speakers")?;
-        d.taps.push(t);
-        let reader = aggregate(SPEAKER_TAP_NAME, "app.mirrormagic.spktap", true, None, Some(&tuid))
-            .or_else(|_| aggregate(SPEAKER_TAP_NAME, "app.mirrormagic.spktap2", true, Some(&out), Some(&tuid)))?;
-        d.devs.push(reader);
-        Ok(dev)
-    });
-    match spk {
-        Ok(id) => {
-            d.speaker = Some(id);
-            log.push(format!("{SPEAKER_NAME}: device {id}"));
+    // PC output: aggregate around the real output, its output tapped (muted) for the PC
+    for pc in outputs {
+        let r = out.clone().ok_or_else(|| "no default output".to_string()).and_then(|out| {
+            let uid = format!("{UID}out.{pc}");
+            let dev = aggregate(&mac_name(pc), &uid, false, Some(&out), None)?;
+            d.devs.push(dev);
+            let (t, tuid) = tap(true, &[me], Some(&uid), &format!("MirrorMagic {pc}"))?;
+            d.taps.push(t);
+            let tap_uid = format!("{UID}tap.{pc}");
+            let reader = aggregate(&reader_name(pc), &tap_uid, true, None, Some(&tuid)).or_else(|_| aggregate(&reader_name(pc), &format!("{tap_uid}.2"), true, Some(&out), Some(&tuid)))?;
+            d.devs.push(reader);
+            Ok(dev)
+        });
+        match r {
+            Ok(id) => d.speakers.push((id, pc.clone())),
+            Err(e) => log.push(format!("{pc}: {e}")),
         }
-        Err(e) => log.push(format!("{SPEAKER_NAME} failed: {e}")),
     }
+    log.push(format!("{} microphone(s), {} speaker(s) of the PC offered", d.mics.len(), d.speakers.len()));
     (d, log)
 }

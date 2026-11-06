@@ -26,6 +26,13 @@ fn name(d: &cpal::Device) -> String {
     d.description().map(|x| x.name().to_string()).unwrap_or_default()
 }
 
+/// Names of the inputs and outputs, for the Mac to offer as its own devices.
+pub fn devices() -> (Vec<String>, Vec<String>) {
+    let host = cpal::default_host();
+    let names = |it: Option<Vec<cpal::Device>>| it.unwrap_or_default().iter().map(name).filter(|n| !n.is_empty()).collect();
+    (names(host.input_devices().ok().map(|i| i.collect())), names(host.output_devices().ok().map(|i| i.collect())))
+}
+
 /// The webcam's microphone if there is one (e.g. "Mikrofon (HD Pro Webcam C920)"), else the default input.
 // shortcut: name heuristic, add a device picker if someone has two webcams
 fn pick_input(host: &cpal::Host) -> Option<cpal::Device> {
@@ -37,17 +44,17 @@ fn pick_input(host: &cpal::Host) -> Option<cpal::Device> {
 }
 
 /// Captures until `stop` is set. `chunk(rate, pcm)` gets 10 ms of mono audio at a time.
-/// `device`: the first input whose name contains it; None: the webcam's microphone.
-/// Returns the device name, or an error if no input could be opened.
-pub fn capture(device: Option<&'static str>, stop: Arc<AtomicBool>, chunk: impl FnMut(u32, Vec<i16>) + Send + 'static) -> Result<String, String> {
+/// `device`: the input with this name (else the first containing it); None: the webcam's
+/// microphone. Returns the device name, or an error if no input could be opened.
+pub fn capture(device: Option<String>, stop: Arc<AtomicBool>, chunk: impl FnMut(u32, Vec<i16>) + Send + 'static) -> Result<String, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let host = cpal::default_host();
-        let dev = match device {
-            Some(n) => host.input_devices().ok().and_then(|mut it| it.find(|d| name(d).contains(n))),
+        let dev = match &device {
+            Some(n) => by_name(host.input_devices().ok().map(|i| i.collect()), n),
             None => pick_input(&host),
         };
-        let Some(dev) = dev else { return tx.send(Err(format!("no input {}", device.unwrap_or("microphone")))).unwrap_or(()) };
+        let Some(dev) = dev else { return tx.send(Err(format!("no input {}", device.as_deref().unwrap_or("microphone")))).unwrap_or(()) };
         let dev_name = name(&dev);
         let Ok(cfg) = dev.default_input_config() else { return tx.send(Err(format!("{dev_name}: no input format"))).unwrap_or(()) };
         let rate = cfg.sample_rate();
@@ -91,15 +98,26 @@ pub fn capture(device: Option<&'static str>, stop: Arc<AtomicBool>, chunk: impl 
     rx.recv_timeout(Duration::from_secs(5)).map_err(|_| "microphone did not start".to_string())?
 }
 
-/// Plays mono 16-bit samples on the default output until `stop` is set. Returns the queue to
-/// push samples into.
-pub fn play(rate: u32, stop: Arc<AtomicBool>) -> Result<Queue, String> {
+/// The device with exactly this name, else the first whose name contains it.
+fn by_name(list: Option<Vec<cpal::Device>>, n: &str) -> Option<cpal::Device> {
+    let list = list.unwrap_or_default();
+    let i = list.iter().position(|d| name(d) == n).or_else(|| list.iter().position(|d| name(d).contains(n)))?;
+    list.into_iter().nth(i)
+}
+
+/// Plays mono 16-bit samples on the output with this name (None: the default output) until
+/// `stop` is set. Returns the queue to push samples into.
+pub fn play(rate: u32, device: Option<String>, stop: Arc<AtomicBool>) -> Result<Queue, String> {
     let buf = Arc::new(Mutex::new(VecDeque::<i16>::new()));
     let (tx, rx) = std::sync::mpsc::channel();
     let b = buf.clone();
     std::thread::spawn(move || {
         let host = cpal::default_host();
-        let Some(dev) = host.default_output_device() else { return tx.send(Err("no output device".to_string())).unwrap_or(()) };
+        let dev = match &device {
+            Some(n) => by_name(host.output_devices().ok().map(|i| i.collect()), n),
+            None => host.default_output_device(),
+        };
+        let Some(dev) = dev else { return tx.send(Err(format!("no output {}", device.as_deref().unwrap_or("device")))).unwrap_or(()) };
         let device = name(&dev);
         let Some(cfg) = dev.supported_output_configs().ok().and_then(|mut it| {
             it.find(|c| c.sample_format() == SampleFormat::F32 && c.min_sample_rate() <= rate && rate <= c.max_sample_rate())
@@ -155,20 +173,30 @@ pub fn reader(mut rx: mm_core::secure::Receiver) -> (tokio::task::JoinHandle<()>
     (h, out)
 }
 
-/// Plays incoming chunks; (re)opens the default output when the rate changes. Stops on drop.
+/// Plays incoming chunks; (re)opens the output when the rate or device changes. Stops on drop.
 #[derive(Default)]
 pub struct Player {
+    /// Output by name; None: the default output.
+    pub device: Option<String>,
     cur: Option<(u32, Arc<AtomicBool>, Queue)>,
 }
 
 impl Player {
+    /// Plays on another output from the next chunk on.
+    pub fn set_device(&mut self, device: Option<String>) {
+        if self.device != device {
+            self.stop();
+            self.device = device;
+        }
+    }
+
     /// Returns the open result when this chunk (re)opened the output, for the log.
     pub fn push(&mut self, rate: u32, pcm: Vec<i16>) -> Option<Result<(), String>> {
         let mut opened = None;
         if self.cur.as_ref().map(|c| c.0) != Some(rate) {
             self.stop();
             let stop = Arc::new(AtomicBool::new(false));
-            let q = play(rate, stop.clone());
+            let q = play(rate, self.device.clone(), stop.clone());
             opened = Some(q.as_ref().map(|_| ()).map_err(|e| e.clone()));
             // on failure keep an unplayed queue: don't retry every 10 ms
             self.cur = Some((rate, stop, q.unwrap_or_default()));

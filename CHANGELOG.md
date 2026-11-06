@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.14 — 2026-11-06 (protocol 7)
+
+- **Pick each PC audio device in Teams.** Instead of one "PC Microphone" and one "PC Speakers", the Mac now offers every PC input and output under its own name. Examples: "Mikrofon (Jabra Link 390) – PC", "Mikrofon (HD Pro Webcam C920) – PC", "Lautsprecher (Jabra Link 390) – PC". Teams adds "(Aggregate)", the macOS type of these devices. The PC records from exactly the microphone you pick and plays on exactly the speaker you pick. The PC sends its device list when the Mac connects; after plugging in a new device on the PC, reconnect (restart MirrorMagic on either side).
+- Protocol 7: `AudioWant` carries device names, and `AudioDevices` (PC → Mac) is new. Version 6 was a draft that lived for one afternoon, so the PC refuses the audio channel below 7.
+
 ## 0.5.13 — 2026-11-06 (Mac)
 
 - **Fix for 0.5.11: monitor mode failed after a MirrorMagic restart.** macOS keeps a display that MirrorMagic switched off off, even after MirrorMagic quits. After the update to 0.5.12, the new instance saw no external display and didn't know its ID. Ctrl+Alt+M then failed with `mirror true failed: no external display connected` (Mac log 18:56:02). Now:
