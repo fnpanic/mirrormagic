@@ -2,7 +2,7 @@
 
 ## 0.4.0 — 2026-11-06
 
-- **The PC camera runs only while an app uses it.** macOS reports OBS's virtual camera as "in use" whenever OBS feeds it, which kept the webcam on all the time. Now the virtual camera stays off while idle; when an app opens "OBS Virtual Camera", the webcam, its microphone and OBS start. While it runs, MirrorMagic checks every 45 s whether an app still watches, by pausing OBS for about half a second; viewers see a brief OBS still image then. When the call ends, everything turns off within a minute.
+- **The PC camera runs only while an app uses it.** macOS reports OBS's virtual camera as "in use" whenever OBS feeds it, which kept the webcam on all the time. Now the virtual camera stays off while idle; when an app opens "OBS Virtual Camera", the webcam, its microphone and OBS start. MirrorMagic follows the macOS CoreMediaIO log for camera-control events (the method Objective-See's OverSight uses); when an app releases the camera, it checks once whether anyone still watches and turns everything off. During a call there is no interruption except a 10-minute safety check. Without access to that log it falls back to a check every 45 s (OBS paused for about half a second).
 - **Monitor hotkey:**
   - Ctrl+Alt+M (and other AltGr letters such as Q, E, 7–0 on German keyboards) can be recorded again. The browser reports those as AltGraph instead of Ctrl+Alt.
   - New **Reset** button restores Ctrl+Alt+M.

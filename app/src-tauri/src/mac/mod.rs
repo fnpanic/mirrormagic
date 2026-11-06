@@ -1,5 +1,6 @@
 //! Mac (secondary) runtime: connects to the PC, injects its input, switches the monitor back,
 //! and turns the PC camera into the OBS virtual camera when an app opens it.
+pub mod camlog;
 pub mod inject;
 pub mod obs;
 pub mod sys;
@@ -337,6 +338,9 @@ fn camera_watch() {
     let in_use = || sys::cameras().iter().any(|(n, running)| *running && n.contains("OBS Virtual Camera"));
     let mut d = Demand::default();
     let mut task: Option<tokio::task::JoinHandle<()>> = None;
+    // camera-control events from the macOS log: who controls a camera, and when it is released
+    let (ltx, lrx) = std::sync::mpsc::channel::<i64>();
+    camlog::follow(ltx);
     // start from a known state: OBS may still run its virtual camera from before (counts as "in use")
     if obs::running() {
         let _ = rt.block_on(obs::set_virtualcam(false));
@@ -345,6 +349,18 @@ fn camera_watch() {
     loop {
         std::thread::sleep(Duration::from_secs(1));
         let (auto, manual) = (config::get().camera_auto, CAM_MANUAL.load(Ordering::SeqCst));
+        for pid in lrx.try_iter() {
+            // the log works: no need to interrupt calls with frequent probes
+            d.probe_every_ms = mm_core::camdemand::PROBE_WITH_LOG_MS;
+            if pid <= 0 {
+                if d.on {
+                    status::log("camera: an app released a camera, checking whether anyone still watches");
+                }
+                d.release_hint();
+            } else if Some(pid) != camlog::obs_pid() {
+                status::log(format!("camera: {} controls a camera", camlog::process_name(pid)));
+            }
+        }
         let cmd = match d.poll(1000, auto && in_use(), manual) {
             Cmd::Probe => {
                 // OBS feeding its own virtual camera counts as "in use": pause it to see if an app watches
