@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4 — 2026-11-06 (PC only)
+
+- Game mode no longer switches on for a moment at every Alt+Tab. The Windows 11 task switcher is a full-screen Explorer window (`XamlExplorerHostIslandWindow`), so it counted as a full-screen app for about a second and briefly blocked crossing. Shell overlays are excluded now, and the log names the window class that turned game mode on.
+
 ## 0.5.3 — 2026-11-06 (PC only)
 
 - **Game mode.** While a full-screen app is in front (a game in exclusive or borderless full-screen, F11 video, a presentation) and you work on the PC, MirrorMagic removes its keyboard and mouse hooks completely. The game gets its input exactly as without MirrorMagic, with zero added latency, and the pointer can't cross to the Mac at the screen edge. A maximized window is not full-screen. Within half a second of leaving the game (Alt+Tab, closing it), the hooks are back. The monitor hotkey doesn't work while game mode is on. The PC window shows "Game mode", and MirrorMagic.log has `game mode on/off`.

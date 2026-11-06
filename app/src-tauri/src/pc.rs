@@ -178,12 +178,15 @@ fn switch_monitor(to_mac: bool) {
 /// Called by the hook thread every 500 ms. While a full-screen app (game, video) is in front and
 /// the PC has control, the input hooks are removed: input reaches the app with zero added
 /// latency, and the pointer cannot cross to the Mac. Returns whether the hooks should be installed.
-pub fn hooks_wanted(fullscreen_in_front: bool) -> bool {
+pub fn hooks_wanted(fullscreen_in_front: Option<String>) -> bool {
     static GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let game = fullscreen_in_front && primary().state == State::Local;
+    let game = fullscreen_in_front.is_some() && primary().state == State::Local;
     if GAME.swap(game, Ordering::SeqCst) != game {
         std::thread::spawn(move || {
-            status::log(if game { "game mode on: full-screen app in front, input hooks removed" } else { "game mode off: input hooks back" });
+            status::log(match fullscreen_in_front {
+                Some(class) if game => format!("game mode on: full-screen app in front ({class}), input hooks removed"),
+                _ => "game mode off: input hooks back".to_string(),
+            });
             status::update(|s| s.game_mode = game);
         });
     }

@@ -25,23 +25,28 @@ pub fn monitors() -> Vec<Rect> {
     v
 }
 
-/// Covers its whole monitor without merely being maximized, and is not the desktop/taskbar:
-/// games (exclusive or borderless), full-screen video, presentations.
+/// Covers its whole monitor without merely being maximized, and is not part of the shell:
+/// games (exclusive or borderless), full-screen video, presentations. The Windows 11 task
+/// switcher (Alt+Tab, Win+Tab) is a full-screen Explorer XAML window and must not count.
 fn is_fullscreen(class: &str, zoomed: bool, win: RECT, mon: RECT) -> bool {
     !zoomed
-        && !matches!(class, "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd")
+        && !matches!(
+            class,
+            "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "XamlExplorerHostIslandWindow" | "MultitaskingViewFrame" | "TaskSwitcherWnd" | "ForegroundStaging"
+        )
         && win.left <= mon.left
         && win.top <= mon.top
         && win.right >= mon.right
         && win.bottom >= mon.bottom
 }
 
-pub fn fullscreen_app_in_front() -> bool {
+/// The window class of a full-screen app in front, if any.
+pub fn fullscreen_app_in_front() -> Option<String> {
     use windows_sys::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
     unsafe {
         let h = GetForegroundWindow();
         if h.is_null() {
-            return false;
+            return None;
         }
         let mut class = [0u16; 64];
         let n = GetClassNameW(h, class.as_mut_ptr(), class.len() as i32).max(0) as usize;
@@ -49,9 +54,10 @@ pub fn fullscreen_app_in_front() -> bool {
         let mut info: MONITORINFO = std::mem::zeroed();
         info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
         if GetWindowRect(h, &mut win) == 0 || GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mut info) == 0 {
-            return false;
+            return None;
         }
-        is_fullscreen(&String::from_utf16_lossy(&class[..n]), IsZoomed(h) != 0, win, info.rcMonitor)
+        let class = String::from_utf16_lossy(&class[..n]);
+        is_fullscreen(&class, IsZoomed(h) != 0, win, info.rcMonitor).then_some(class)
     }
 }
 
@@ -163,6 +169,7 @@ mod tests {
         assert!(!is_fullscreen("Notepad", false, r(100, 100, 900, 700), mon));
         assert!(!is_fullscreen("Progman", false, mon, mon)); // the desktop itself
         assert!(!is_fullscreen("WorkerW", false, mon, mon));
+        assert!(!is_fullscreen("XamlExplorerHostIslandWindow", false, mon, mon)); // Alt+Tab overlay
         // a game on the second monitor
         assert!(is_fullscreen("UnityWndClass", false, r(2560, 0, 4480, 1080), r(2560, 0, 4480, 1080)));
     }
