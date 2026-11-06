@@ -3,6 +3,7 @@
 ## 0.5.1 — 2026-11-06
 
 - **Fixed: after a monitor switch the Mac cursor could stick to the top edge** and only move sideways until the next switch. macOS applies the mirror layout asynchronously; when the shared monitor's area was read before it moved (from above the laptop screen to 0,0), every move was clamped into the old rectangle. While the PC controls it, the Mac now re-reads the display layout every 500 ms and moves the session to the new area. That also covers HDMI re-plugs and resolution changes mid-session.
+- Verified end-to-end on the real machines: Photo Booth opening "OBS Virtual Camera" turned the PC webcam and microphone on within a second, and quitting it turned them off 21 s later. The monitor hotkey UI was checked in a headless browser (`app/e2e/hotkey.e2e.mjs`): record a combo, Reset to Ctrl+Alt+M, and record Ctrl+Alt+M by keyboard again (also as AltGr).
 - Mac builds can start without typing on the Mac: a LaunchAgent build runner, triggered by file transfer (see docs/macos.md).
 
 ## 0.5.0 — 2026-11-06
