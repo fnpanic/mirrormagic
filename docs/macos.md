@@ -15,7 +15,7 @@ macOS only accepts new cameras as signed Camera Extensions, which need a paid Ap
 3. Approve OBS's camera extension in System Settings if macOS asks (once).
 4. In Teams, Zoom or the browser, choose **OBS Virtual Camera**.
 
-After that, MirrorMagic starts OBS's virtual camera by itself at login. The PC webcam is on only while an app uses the virtual camera (plus 10 s); in between OBS shows a "PC camera is starting" frame.
+OBS's virtual camera stays **off** while no app uses it, because macOS counts OBS feeding it as "in use" (which would keep the PC webcam on all the time). When an app opens "OBS Virtual Camera", MirrorMagic starts the PC webcam and microphone and turns OBS's virtual camera on; the app shows the OBS placeholder for 1–2 s first. Every 45 s MirrorMagic pauses OBS for about half a second to check whether an app still watches; if not, the webcam turns off. See `crates/mm-core/src/camdemand.rs`.
 
 ## Building on the Mac (no CI)
 

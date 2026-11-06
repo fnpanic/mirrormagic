@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Camera, Check, Copy, Keyboard, Laptop, Monitor, MousePointer2, RefreshCw, Search, ShieldAlert } from "lucide-react";
 import { api, type Config, type Side, type Snapshot, type Status } from "./api";
-import { hotkeyFromEvent, isUsableHotkey } from "./hotkey";
+import { DEFAULT_HOTKEY, hotkeyFromEvent, isUsableHotkey } from "./hotkey";
 
 export default function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -172,7 +172,7 @@ function HotkeyField({ value, onSave }: { value: string; onSave: (v: string) => 
         if (!rec) return;
         e.preventDefault();
         if (e.key === "Escape") return setRec(false);
-        const h = hotkeyFromEvent(e);
+        const h = hotkeyFromEvent(e.nativeEvent);
         if (h && isUsableHotkey(h)) {
           setRec(false);
           onSave(h);
@@ -204,7 +204,10 @@ function PcView(p: ViewProps) {
       <Card icon={<Monitor size={18} />} title="Monitor mode"
         aside={<Btn primary onClick={api.toggleMonitor}>{s.monitor_on_mac ? "Show the PC" : "Show the Mac"}</Btn>}>
         <Row label="Hotkey" hint="Switches the monitor to the Mac and puts keyboard and mouse there, and back">
-          <HotkeyField value={c.monitor_hotkey} onSave={(monitor_hotkey) => save({ monitor_hotkey })} />
+          <div className="flex items-center gap-2">
+            <HotkeyField value={c.monitor_hotkey} onSave={(monitor_hotkey) => save({ monitor_hotkey })} />
+            {c.monitor_hotkey !== DEFAULT_HOTKEY && <Btn onClick={() => save({ monitor_hotkey: DEFAULT_HOTKEY })}>Reset</Btn>}
+          </div>
         </Row>
         <Row label="The Mac is connected to" hint={s.ddc.monitor ? `${s.ddc.monitor} · the PC uses ${inputName(c.pc_input)}` : s.ddc.last || "Looking for the monitor…"}>
           <select className={field} value={c.mac_input} onChange={(e) => save({ mac_input: Number(e.target.value) })}>

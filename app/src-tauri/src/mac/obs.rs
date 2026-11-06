@@ -160,7 +160,7 @@ impl Client {
 }
 
 /// Makes OBS feed the virtual camera from our stream. `start_obs`: launch it if not running.
-pub async fn ensure(stream_url: &str, start_obs: bool) -> Result<String, String> {
+pub async fn ensure(stream_url: &str, start_obs: bool, virtualcam: bool) -> Result<String, String> {
     if !installed() {
         return Err("OBS is not installed (get it from obsproject.com)".into());
     }
@@ -245,11 +245,19 @@ pub async fn ensure(stream_url: &str, start_obs: bool) -> Result<String, String>
             .await;
     }
     c.call("SetCurrentProgramScene", json!({ "sceneName": SCENE })).await?;
+    // the virtual camera only runs while an app watches (see mm_core::camdemand)
     let vc = c.call("GetVirtualCamStatus", json!({})).await?;
-    if vc["outputActive"] != true {
-        c.call("StartVirtualCam", json!({})).await?;
+    if (vc["outputActive"] == true) != virtualcam {
+        c.call(if virtualcam { "StartVirtualCam" } else { "StopVirtualCam" }, json!({})).await?;
     }
-    Ok("OBS Virtual Camera is on and shows the PC camera".into())
+    Ok("OBS is set up for the PC camera".into())
+}
+
+/// Switches OBS's virtual camera output on or off (OBS must be set up and running).
+pub async fn set_virtualcam(on: bool) -> Result<(), String> {
+    let password = crate::config::get().obs_password;
+    let mut c = Client::connect(&password).await?;
+    c.call(if on { "StartVirtualCam" } else { "StopVirtualCam" }, json!({})).await.map(|_| ())
 }
 
 #[cfg(test)]

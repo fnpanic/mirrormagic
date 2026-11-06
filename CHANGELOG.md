@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 — 2026-11-06
+
+- **The PC camera runs only while an app uses it.** macOS reports OBS's virtual camera as "in use" whenever OBS feeds it, which kept the webcam on all the time. Now the virtual camera stays off while idle; when an app opens "OBS Virtual Camera", the webcam, its microphone and OBS start. While it runs, MirrorMagic checks every 45 s whether an app still watches, by pausing OBS for about half a second; viewers see a brief OBS still image then. When the call ends, everything turns off within a minute.
+- **Monitor hotkey:**
+  - Ctrl+Alt+M (and other AltGr letters such as Q, E, 7–0 on German keyboards) can be recorded again. The browser reports those as AltGraph instead of Ctrl+Alt.
+  - New **Reset** button restores Ctrl+Alt+M.
+- **PC app robustness:**
+  - The keyboard hook re-installs itself every 2 s and runs at top priority. Windows silently drops a late hook, which had stopped typing on the Mac and the hotkey.
+  - Panics in hook callbacks are caught.
+  - All panics are written to MirrorMagic.log.
+- Fixed double-encoded characters in the settings window.
+- Protocol version 2. A 0.2 Mac talking to a 0.3 PC used to reconnect in a loop; mismatched versions are now refused cleanly.
+
 ## 0.3.0 — 2026-11-05
 
 - **PC microphone on the Mac.** The webcam's microphone streams together with the camera (10 ms chunks, sent ahead of video on the camera connection). On the Mac it plays into the **BlackHole 2ch** virtual audio device; pick "BlackHole 2ch" as the microphone in your app. On the PC you can turn this off under Camera → Microphone.

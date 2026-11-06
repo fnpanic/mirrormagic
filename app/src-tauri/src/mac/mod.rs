@@ -108,10 +108,12 @@ fn obs_status(detail: String) {
 }
 
 pub async fn setup_obs(start: bool) -> Result<String, String> {
-    let r = obs::ensure(mjpeg::URL, start).await;
+    // the virtual camera runs only while an app watches (camera_watch switches it)
+    let r = obs::ensure(mjpeg::URL, start, CAM_WANTED.load(Ordering::SeqCst)).await;
     status::log(format!("obs setup: {r:?}"));
     let ok = r.is_ok();
-    status::update(|s| s.obs.virtualcam = ok);
+    let vc = ok && CAM_WANTED.load(Ordering::SeqCst);
+    status::update(|s| s.obs.virtualcam = vc);
     obs_status(match &r {
         Ok(m) | Err(m) => m.clone(),
     });
@@ -330,32 +332,61 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
 
 /// Watches whether any app uses the OBS virtual camera; streams the PC camera only then.
 fn camera_watch() {
-    let mut last_use = None::<Instant>;
+    use mm_core::camdemand::{Cmd, Demand};
+    let rt = RT.get().unwrap();
+    let in_use = || sys::cameras().iter().any(|(n, running)| *running && n.contains("OBS Virtual Camera"));
+    let mut d = Demand::default();
     let mut task: Option<tokio::task::JoinHandle<()>> = None;
+    // start from a known state: OBS may still run its virtual camera from before (counts as "in use")
+    if obs::running() {
+        let _ = rt.block_on(obs::set_virtualcam(false));
+        std::thread::sleep(Duration::from_millis(500));
+    }
     loop {
         std::thread::sleep(Duration::from_secs(1));
-        let auto = config::get().camera_auto;
-        let in_use = auto && sys::cameras().iter().any(|(n, running)| *running && n.contains("OBS Virtual Camera"));
-        if in_use {
-            last_use = Some(Instant::now());
-        }
-        // keep streaming 10 s after the last user, so call apps that re-open the camera don't flicker
-        let want = CAM_MANUAL.load(Ordering::SeqCst) || last_use.is_some_and(|t| t.elapsed() < Duration::from_secs(10));
-        if want != CAM_WANTED.swap(want, Ordering::SeqCst) {
-            status::log(format!("camera wanted: {want} (devices: {:?})", sys::cameras()));
-            status::update(|s| s.camera_wanted = want);
-            send(Msg::CameraWanted { on: want });
-            if want {
-                task = Some(RT.get().unwrap().spawn(camera_stream()));
-                if !status::get().obs.virtualcam {
-                    // an app opened the camera: make sure OBS shows the PC camera
-                    RT.get().unwrap().spawn(async { setup_obs(true).await });
-                }
-            } else if let Some(t) = task.take() {
-                t.abort();
-                let _ = FRAMES.get().unwrap().send(None);
+        let (auto, manual) = (config::get().camera_auto, CAM_MANUAL.load(Ordering::SeqCst));
+        let cmd = match d.poll(1000, auto && in_use(), manual) {
+            Cmd::Probe => {
+                // OBS feeding its own virtual camera counts as "in use": pause it to see if an app watches
+                let _ = rt.block_on(obs::set_virtualcam(false));
+                std::thread::sleep(Duration::from_millis(500));
+                let watching = in_use();
+                status::log(format!("camera probe: app watching = {watching}"));
+                d.probe_result(watching)
             }
+            c => c,
+        };
+        match cmd {
+            Cmd::Start => {
+                status::log(format!("camera: an app opened it (devices: {:?})", sys::cameras()));
+                set_camera_wanted(true, &mut task);
+                rt.spawn(async { setup_obs(true).await });
+            }
+            Cmd::Resume => {
+                if let Err(e) = rt.block_on(obs::set_virtualcam(true)) {
+                    status::log(format!("camera: OBS resume failed: {e}"));
+                    rt.spawn(async { setup_obs(true).await });
+                }
+            }
+            Cmd::Stop => {
+                status::log("camera: no app watches any more, PC camera off");
+                set_camera_wanted(false, &mut task);
+                status::update(|s| s.obs.virtualcam = false);
+            }
+            _ => {}
         }
+    }
+}
+
+fn set_camera_wanted(want: bool, task: &mut Option<tokio::task::JoinHandle<()>>) {
+    CAM_WANTED.store(want, Ordering::SeqCst);
+    status::update(|s| s.camera_wanted = want);
+    send(Msg::CameraWanted { on: want });
+    if want {
+        *task = Some(RT.get().unwrap().spawn(camera_stream()));
+    } else if let Some(t) = task.take() {
+        t.abort();
+        let _ = FRAMES.get().unwrap().send(None);
     }
 }
 

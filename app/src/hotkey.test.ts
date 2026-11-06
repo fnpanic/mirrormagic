@@ -25,3 +25,13 @@ describe("isUsableHotkey", () => {
     expect(isUsableHotkey("F13")).toBe(true);
   });
 });
+
+describe("AltGr layouts", () => {
+  it("records Ctrl+Alt+M on a German keyboard, where the browser reports AltGraph (µ)", () => {
+    const altGrM = { code: "KeyM", key: "µ", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, getModifierState: (k: string) => k === "AltGraph" };
+    expect(hotkeyFromEvent(altGrM)).toBe("Ctrl+Alt+M");
+    expect(isUsableHotkey(hotkeyFromEvent(altGrM)!)).toBe(true);
+    // with both flags set (other browsers) it must not double up
+    expect(hotkeyFromEvent({ ...altGrM, ctrlKey: true, altKey: true })).toBe("Ctrl+Alt+M");
+  });
+});
