@@ -61,6 +61,12 @@ pub fn fullscreen_app_in_front() -> Option<String> {
     }
 }
 
+/// Resets Windows' display-off idle timer once.
+pub fn keep_display_on() {
+    use windows_sys::Win32::System::Power::{SetThreadExecutionState, ES_DISPLAY_REQUIRED};
+    unsafe { SetThreadExecutionState(ES_DISPLAY_REQUIRED) };
+}
+
 pub fn warp(x: f64, y: f64) {
     unsafe { SetCursorPos(x.round() as i32, y.round() as i32) };
 }

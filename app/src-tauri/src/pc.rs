@@ -102,7 +102,18 @@ pub fn on_key(scan: u16, down: bool) -> bool {
     run(out)
 }
 pub fn on_move(x: f64, y: f64) -> bool {
-    let out = primary().mouse_move(x, y);
+    let mut p = primary();
+    if p.state != State::Local {
+        // Measure from where the hidden cursor really is (GetCursorPos inside the hook = before
+        // this event). Moves that slip past the hook (the 2 s re-install, a hook Windows dropped)
+        // shift it, and deltas from the stored park point would then carry that shift forever:
+        // the Mac cursor got pulled left or right on its own.
+        if let Some((cx, cy)) = win::cursor_pos() {
+            p.set_park(cx, cy);
+        }
+    }
+    let out = p.mouse_move(x, y);
+    drop(p);
     run(out)
 }
 pub fn on_button(b: mm_core::proto::Button, down: bool) -> bool {
@@ -130,6 +141,9 @@ pub fn release() {
 static PEER_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(PROTOCOL_VERSION);
 
 pub fn send(m: Msg) {
+    if matches!(m, Msg::PcDisplay { .. }) && PEER_VERSION.load(Ordering::SeqCst) < 4 {
+        return;
+    }
     if matches!(m, Msg::FilesOffer { .. }) && PEER_VERSION.load(Ordering::SeqCst) < 3 {
         status::update(|s| s.clipboard = "files need MirrorMagic 0.5 on the Mac".into());
         return;
@@ -208,8 +222,10 @@ fn on_display_state(state: u32) {
     let prev = LAST.swap(state, Ordering::SeqCst);
     if state == 0 && prev != 0 {
         std::thread::spawn(|| status::log("display off (Windows power saving)"));
+        send(Msg::PcDisplay { on: false }); // the Mac sleeps its displays once it is idle too
     }
     if display_came_back(prev, state) {
+        send(Msg::PcDisplay { on: true });
         std::thread::spawn(restore_pc_input);
     }
 }
@@ -261,6 +277,9 @@ fn maintenance() {
     loop {
         std::thread::sleep(Duration::from_secs(2));
         if primary().state != State::Local {
+            // Working on the Mac with this mouse: the hook may swallow the input that would keep
+            // Windows awake, and a dark PC screen lets the monitor jump to the Mac's HDMI signal.
+            win::keep_display_on();
             continue;
         }
         let cfg = primary_config();

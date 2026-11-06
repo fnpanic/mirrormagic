@@ -88,6 +88,39 @@ pub fn layout(ds: &[DisplayInfo]) -> Option<(Rect, Option<Rect>)> {
     Some((rect(edge), monitor.map(rect)))
 }
 
+// ---------------------------------------------------------------- idle / display sleep
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64;
+}
+
+/// Seconds since the last keyboard/mouse/trackpad input on this Mac (HID system state, any event).
+pub fn idle_seconds() -> f64 {
+    unsafe { CGEventSourceSecondsSinceLastEventType(1, u32::MAX) }
+}
+
+/// Does `pmset -g assertions` say a program keeps the display awake (video, caffeinate -d, a test run)?
+pub fn display_sleep_prevented() -> bool {
+    std::process::Command::new("/usr/bin/pmset")
+        .args(["-g", "assertions"])
+        .output()
+        .map(|o| prevents_display_sleep(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or(true) // unknown: better leave the displays alone
+}
+
+fn prevents_display_sleep(assertions: &str) -> bool {
+    assertions.lines().any(|l| {
+        let mut w = l.split_whitespace();
+        w.next() == Some("PreventUserIdleDisplaySleep") && w.next() == Some("1")
+    })
+}
+
+/// Puts all displays to sleep now (no admin rights needed); any input wakes them.
+pub fn sleep_displays() {
+    let _ = std::process::Command::new("/usr/bin/pmset").arg("displaysleepnow").status();
+}
+
 // ---------------------------------------------------------------- Accessibility
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -201,5 +234,24 @@ pub fn cameras() -> Vec<(String, bool)> {
                 (name, running)
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn display_sleep_assertion_is_read_from_the_summary() {
+        let busy = "Assertion status system-wide:
+   BackgroundTask                 0
+   PreventUserIdleDisplaySleep    1
+   PreventUserIdleSystemSleep     1
+";
+        assert!(super::prevents_display_sleep(busy));
+        let idle = "Assertion status system-wide:
+   PreventUserIdleDisplaySleep    0
+Listed by owning process:
+   pid 1(x): PreventUserIdleDisplaySleep named: \"y\"
+";
+        assert!(!super::prevents_display_sleep(idle));
     }
 }

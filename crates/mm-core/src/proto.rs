@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
-pub const PROTOCOL_VERSION: u32 = 3; // 3: clipboard files
+pub const PROTOCOL_VERSION: u32 = 4; // 3: clipboard files, 4: PcDisplay
 /// Oldest peer version still understood: newer versions only append messages, so the PC answers
 /// with the lower of both versions and never sends a peer messages it does not know.
 pub const MIN_COMPATIBLE_VERSION: u32 = 2;
@@ -120,6 +120,8 @@ pub enum Msg {
     FileEntry { path: String, size: u64, dir: bool },
     FileData { data: Vec<u8> },
     FilesEnd,
+    /// Control, PC → Mac: Windows turned its screen off (user away) or on again.
+    PcDisplay { on: bool },
 }
 
 pub fn encode(msg: &Msg) -> Vec<u8> {

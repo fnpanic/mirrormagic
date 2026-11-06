@@ -534,6 +534,21 @@ mod tests {
     }
 
     #[test]
+    fn a_cursor_that_slipped_past_the_hook_causes_no_pull() {
+        let mut p = pc();
+        p.mouse_move(0.0, 360.0); // on the Mac, parked at 1280,720
+        // during a hook re-install one move reached Windows: the hidden cursor now sits at 1290
+        let slipped = (1290.0, 720.0);
+        // stale park: every further 1 px move to the left would arrive as +9 (pulled right)
+        assert_eq!(sent(&p.mouse_move(1289.0, 720.0)), vec![Msg2::Motion { dx: 9, dy: 0 }]);
+        // the PC measures from the real cursor before each move (pc::on_move): no pull
+        for _ in 0..5 {
+            p.set_park(slipped.0, slipped.1);
+            assert_eq!(sent(&p.mouse_move(1289.0, 720.0)), vec![Msg2::Motion { dx: -1, dy: 0 }]);
+        }
+    }
+
+    #[test]
     fn park_follows_the_real_cursor_and_replacement_sessions_resync() {
         let mut p = pc();
         p.mouse_move(0.0, 10.0);

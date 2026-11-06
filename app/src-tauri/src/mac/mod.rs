@@ -232,7 +232,34 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
     sec().exit();
     inj().release_all();
     mirror(false);
+    PC_DISPLAY_OFF.store(false, Ordering::SeqCst);
     r
+}
+
+static PC_DISPLAY_OFF: AtomicBool = AtomicBool::new(false);
+static SLEEP_WATCH: AtomicBool = AtomicBool::new(false);
+/// Nobody has touched the Mac for this long (seconds) while the PC's screen is off: user away.
+const AWAY_S: f64 = 60.0;
+
+/// While the PC's screen is off, the monitor's automatic input detection shows the Mac's HDMI
+/// signal (its second screen). Once the Mac is idle too, the user is away from both: put the
+/// displays to sleep, so the monitor gets no signal and goes to standby. Not while a program
+/// keeps the display awake (video, caffeinate -d, a test run).
+fn sleep_displays_when_idle() {
+    while PC_DISPLAY_OFF.load(Ordering::SeqCst) {
+        let idle = sys::idle_seconds();
+        if idle >= AWAY_S {
+            if sys::display_sleep_prevented() {
+                status::log("PC screen off, Mac idle: a program keeps the display awake, leaving it on");
+            } else {
+                status::log(format!("PC screen off, Mac idle for {idle:.0} s: displays to sleep"));
+                sys::sleep_displays();
+            }
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+    SLEEP_WATCH.store(false, Ordering::SeqCst);
 }
 
 /// Monitor mode shows the Mac's main screen: mirror it onto the shared monitor while active.
@@ -355,6 +382,13 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                     status::update(|s| s.clipboard = format!("file transfer failed: {e}"));
                 }
             });
+        }
+        Msg::PcDisplay { on } => {
+            status::log(format!("PC screen {}", if on { "on" } else { "off" }));
+            PC_DISPLAY_OFF.store(!on, Ordering::SeqCst);
+            if !on && !SLEEP_WATCH.swap(true, Ordering::SeqCst) {
+                std::thread::spawn(sleep_displays_when_idle);
+            }
         }
         Msg::FilesPushRequest { id } => {
             // the PC wants the files this Mac offered

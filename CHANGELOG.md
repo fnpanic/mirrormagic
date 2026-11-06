@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.6 — 2026-11-06
+
+- **Fixed: the Mac cursor was sometimes pulled left or right on its own** (PC fix). While you control the Mac, the PC's hidden cursor waits at a park point and every move is sent as the distance from it. Moves that slipped past the input hook (during its 2 s re-install, or a hook Windows dropped) shifted the hidden cursor, and every later move carried that shift as a constant offset, so the Mac cursor drifted toward one side until the next switch. Each move is now measured from where the hidden cursor really is.
+- **The monitor no longer shows the Mac's second screen while you are away.**
+  - While you control the Mac with the PC's mouse, the PC keeps its screen awake, because the hook can swallow the input that would otherwise keep it on.
+  - When Windows turns its screen off, it tells the Mac (protocol 4). Once nobody has touched the Mac for 60 s either, the Mac puts its displays to sleep (`pmset displaysleepnow`), so the monitor gets no signal and goes to standby instead of showing the Mac. This doesn't happen while a program keeps the display awake (video, `caffeinate -d`, a test run), and any input wakes the Mac.
+  - When you come back, the 0.5.2 switch-back puts the monitor on the PC.
+
 ## 0.5.5 — 2026-11-06 (Mac)
 
 - **Fixed: the Mac cursor drifted and jumped (since 0.5.1).** While the screen was mirrored for monitor mode, macOS alternated which display of the mirror set it reported as active. The half-second layout check from 0.5.1 then flipped the cursor area between the laptop's size and the monitor's, and the cursor jumped or got clamped. The display list now holds all connected displays and leaves out a display that only mirrors another. In addition, the real cursor position overrides the tracked one only if it is more than 3 points away (the Mac's own trackpad moved it), so a rounded or late read-back can't nudge the cursor. When the layout changes, the cursor is clamped into the new area instead of jumping to its middle.
