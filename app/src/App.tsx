@@ -116,7 +116,7 @@ const field = "h-9 rounded-md border border-hairline bg-canvas px-3 text-caption
 function Shared({ snap, save }: ViewProps) {
   return (
     <Card icon={<RefreshCw size={18} />} title="General">
-      <Row label="Share the clipboard" hint={snap.status.clipboard ? `Last switch: ${snap.status.clipboard}` : "Text, formatted text and images travel with the pointer when you switch"}>
+      <Row label="Share the clipboard" hint={snap.status.clipboard ? `Last switch: ${snap.status.clipboard}` : "Text, formatted text, images and files travel with the pointer when you switch"}>
         <Toggle label="Share the clipboard" on={snap.config.clipboard} onChange={(v) => save({ clipboard: v })} />
       </Row>
       <Row label={snap.role === "pc" ? "Start with Windows" : "Start at login"} hint="Runs quietly in the tray">

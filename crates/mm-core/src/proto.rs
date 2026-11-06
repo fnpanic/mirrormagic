@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
-pub const PROTOCOL_VERSION: u32 = 2; // 2: Msg::Audio (shifted variant numbers)
+pub const PROTOCOL_VERSION: u32 = 3; // 3: clipboard files
 pub const DEFAULT_PORT: u16 = 24850;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,6 +11,8 @@ pub enum Channel {
     Control,
     /// Camera frames. Kept on its own TCP connection so frames never delay input.
     Camera,
+    /// Clipboard files, one connection per transfer (opened by the Mac, either direction).
+    Files,
 }
 
 /// Where input goes while the Mac has control.
@@ -103,6 +105,18 @@ pub enum Msg {
     Audio { rate: u32, pcm: Vec<i16> },
     Ping { t: u64 },
     Pong { t: u64 },
+    /// Control: the clipboard holds files; `names` are the top-level items (for display).
+    FilesOffer { id: u64, count: u32, bytes: u64, names: Vec<String> },
+    /// Control, PC → Mac: open a files channel and push offer `id` (only the Mac can dial).
+    FilesPushRequest { id: u64 },
+    /// Files channel, first message from the Mac: send me offer `id`.
+    FilesPull { id: u64 },
+    /// Files channel, first message from the Mac: here comes my offer `id`.
+    FilesPush { id: u64 },
+    /// Files channel: next item; `path` is relative with '/' separators; data follows for files.
+    FileEntry { path: String, size: u64, dir: bool },
+    FileData { data: Vec<u8> },
+    FilesEnd,
 }
 
 pub fn encode(msg: &Msg) -> Vec<u8> {

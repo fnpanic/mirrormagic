@@ -255,6 +255,7 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
     match channel {
         Channel::Control => control(tx, rx, name, addr.ip().to_string()).await,
         Channel::Camera => camera_channel(tx, rx).await,
+        Channel::Files => files_channel(tx, rx).await,
     }
 }
 
@@ -314,6 +315,12 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
                     std::thread::spawn(move || clipboard::receive(text, html, png));
                 }
                 Msg::CameraWanted { on } => camera_wanted(on),
+                Msg::FilesOffer { id, count, bytes, names } => {
+                    status::log(format!("clipboard: Mac offers {count} file(s) {names:?}"));
+                    status::update(|s| s.clipboard = format!("receiving {count} file(s)…"));
+                    PENDING_FILES.lock().unwrap().insert(id, bytes);
+                    let _ = utx.send(Msg::FilesPushRequest { id }); // only the Mac can dial: it pushes
+                }
                 Msg::Ping { t } => {
                     let _ = utx.send(Msg::Pong { t });
                 }
@@ -443,4 +450,31 @@ async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Res
         *AUD_TX.lock().unwrap() = None;
     }
     r
+}
+
+// ---------------------------------------------------------------- clipboard files
+
+/// Offers from the Mac we asked it to push (id → size).
+static PENDING_FILES: Mutex<std::collections::BTreeMap<u64, u64>> = Mutex::new(std::collections::BTreeMap::new());
+
+/// A files connection from the Mac: it pulls our offer, or pushes its own.
+async fn files_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(), secure::Error> {
+    match rx.recv().await? {
+        Msg::FilesPull { id } => {
+            let plan = clipboard::outgoing(id).ok_or("unknown file offer")?;
+            status::log(format!("clipboard: sending {} file(s) to the Mac", plan.items.len()));
+            mm_core::files::send(&mut tx, &plan).await?;
+            let _ = rx.recv().await; // wait until the Mac closes: everything arrived
+            Ok(())
+        }
+        Msg::FilesPush { id } => {
+            let bytes = PENDING_FILES.lock().unwrap().remove(&id).ok_or("files we did not ask for")?;
+            let r = clipboard::receive_files(&mut rx, id, bytes).await;
+            if let Err(e) = &r {
+                status::update(|s| s.clipboard = format!("file transfer failed: {e}"));
+            }
+            r
+        }
+        _ => Err("unexpected files message".into()),
+    }
 }

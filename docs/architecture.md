@@ -23,7 +23,8 @@
 4. Crossing: the PC parks its hidden cursor at the screen centre, and every hook move becomes a delta (`Motion`). The Mac applies the delta to its real cursor position and clamps it to the active display. Pushing past the PC side sends `Leave{along}`.
 5. Monitor mode: the PC sends DDC `0x60 = mac_input`, then `Enter{mode: Monitor}`. Switching back sends `Ddc{pc_input}` to the Mac (its input is the active one then) and also tries DDC from the PC.
 6. Clipboard: the side giving up control sends `Clipboard{text, html, png}` unless its fingerprint equals the last one that crossed. No polling, so clipboard managers see exactly one change per hand-over.
-7. Camera: the Mac polls CoreMediaIO every second. While "OBS Virtual Camera" is running somewhere (plus 10 s), it sends `CameraWanted{true}`; the PC opens the webcam as MJPEG and streams frames.
+7. Files: a copied file list becomes `FilesOffer` on the control channel. The Mac opens a `Files` channel (only the Mac can dial) and either pulls the PC's offer or, after `FilesPushRequest`, pushes its own. Items stream as `FileEntry` plus 512 KB `FileData` chunks, are written below `<temp>/MirrorMagic/files/<id>` with sanitised paths, and are put on the clipboard as a file list (`crates/mm-core/src/files.rs`).
+8. Camera (`crates/mm-core/src/camdemand.rs`): OBS's virtual camera stays off while idle, because macOS counts OBS feeding it as "in use". The Mac polls CoreMediaIO every second; "OBS Virtual Camera" running then means a real app opened it, so it sends `CameraWanted{true}` (the PC opens the webcam as MJPEG and the microphone) and starts OBS's virtual camera. `mac/camlog.rs` follows the unified log for `DeviceControlPID` events. When an app releases a camera, OBS is paused for about half a second to check whether anyone still watches, and if not everything stops (safety check every 10 min, every 45 s without the log).
 
 ## Hook rules (Windows)
 

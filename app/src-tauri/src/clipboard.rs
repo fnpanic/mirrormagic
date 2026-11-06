@@ -59,6 +59,10 @@ fn take() -> Option<Msg> {
         return None;
     }
     let mut cb = arboard::Clipboard::new().ok()?;
+    // copied files (Explorer / Finder) go by an offer; the other side fetches them on their own connection
+    if let Some(list) = cb.get().file_list().ok().filter(|l| !l.is_empty()) {
+        return offer_files(list);
+    }
     let text = cb.get_text().ok().filter(|t| !t.is_empty() && t.len() <= MAX_TEXT);
     let html = cb.get().html().ok().filter(|t| !t.is_empty() && t.len() <= MAX_TEXT);
     let img = cb.get_image().ok();
@@ -88,6 +92,9 @@ fn take() -> Option<Msg> {
 
 /// "text (12 chars), formatting, image" for the status line.
 fn describe(m: &Msg) -> String {
+    if let Msg::FilesOffer { count, bytes, names, .. } = m {
+        return format!("{count} file(s) ({} KB): {}", bytes / 1024, names.join(", "));
+    }
     let Msg::Clipboard { text, html, png } = m else { return String::new() };
     let mut parts = vec![];
     if let Some(t) = text {
@@ -100,6 +107,99 @@ fn describe(m: &Msg) -> String {
         parts.push(format!("image ({} KB)", p.len() / 1024));
     }
     parts.join(", ")
+}
+
+// ---------------------------------------------------------------- files
+
+/// The files this side offered last (id, what to send).
+static OUTGOING: Mutex<Option<(u64, mm_core::files::Plan)>> = Mutex::new(None);
+
+fn files_fingerprint(list: &[std::path::PathBuf]) -> u64 {
+    let mut h = DefaultHasher::new();
+    for p in list {
+        p.hash(&mut h);
+        if let Ok(m) = std::fs::metadata(p) {
+            m.len().hash(&mut h);
+            m.modified().ok().hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
+fn offer_files(list: Vec<std::path::PathBuf>) -> Option<Msg> {
+    let fp = files_fingerprint(&list);
+    {
+        let mut last = LAST.lock().unwrap();
+        if *last == Some(fp) {
+            return None;
+        }
+        *last = Some(fp);
+    }
+    let plan = match mm_core::files::plan(&list) {
+        Ok(p) => p,
+        Err(e) => {
+            crate::status::update(|s| s.clipboard = format!("files not sent: {e}"));
+            return None;
+        }
+    };
+    let id = rand_id();
+    let msg = Msg::FilesOffer { id, count: plan.items.iter().filter(|i| !i.dir).count() as u32, bytes: plan.bytes, names: plan.tops.clone() };
+    *OUTGOING.lock().unwrap() = Some((id, plan));
+    Some(msg)
+}
+
+fn rand_id() -> u64 {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    (t as u64) ^ (std::process::id() as u64).rotate_left(32)
+}
+
+/// The plan for an offer this side made (the peer asks for it by id).
+pub fn outgoing(id: u64) -> Option<mm_core::files::Plan> {
+    OUTGOING.lock().unwrap().as_ref().filter(|(i, _)| *i == id).map(|(_, p)| p.clone())
+}
+
+/// Where received files land: <temp>/MirrorMagic/files/<id>. Older transfers are removed after a day.
+pub fn files_dest(id: u64) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join("MirrorMagic").join("files");
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            let old = e.metadata().and_then(|m| m.modified()).map(|t| t.elapsed().unwrap_or_default().as_secs() > 86_400).unwrap_or(false);
+            if old {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    root.join(id.to_string())
+}
+
+/// Puts received files on the clipboard (paste in Explorer / Finder copies them).
+pub fn set_files(tops: Vec<std::path::PathBuf>) {
+    let Ok(mut cb) = arboard::Clipboard::new() else { return };
+    let r = cb.set().file_list(&tops);
+    // remember them, so the next switch doesn't send them straight back
+    let back = cb.get().file_list().unwrap_or(tops.clone());
+    *LAST.lock().unwrap() = Some(files_fingerprint(&back));
+    let names: Vec<String> = tops.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+    crate::status::log(format!("clipboard: files ready {names:?} ({r:?})"));
+    crate::status::update(|s| s.clipboard = format!("received files: {} — paste to copy", names.join(", ")));
+}
+
+/// Receives an offer's files on an open files channel and puts them on the clipboard.
+pub async fn receive_files(rx: &mut mm_core::secure::Receiver, id: u64, bytes: u64) -> Result<(), mm_core::secure::Error> {
+    let dest = files_dest(id);
+    let mut got = 0u64;
+    let mut last_shown = 0u64;
+    let tops = mm_core::files::recv(rx, &dest, |n| {
+        got += n;
+        if bytes > 0 && got - last_shown > bytes / 20 {
+            last_shown = got;
+            let pct = got * 100 / bytes;
+            crate::status::update(|s| s.clipboard = format!("receiving files… {pct}%"));
+        }
+    })
+    .await?;
+    set_files(tops);
+    Ok(())
 }
 
 /// Called when control leaves this machine. Reads off the input thread and sends via `send`.

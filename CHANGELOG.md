@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 — 2026-11-06
+
+- **Copy files through the clipboard.** Copy files or folders in Explorer or Finder, switch to the other machine, paste. They travel on their own encrypted connection, so input never waits behind a big file. The status shows progress, and the files land in a temporary MirrorMagic folder that is cleaned after a day. Paths from the peer are sanitised (no `..`, absolute paths or drive letters). Limits: 4 GB and 50,000 items per copy.
+- Protocol version 3.
+
 ## 0.4.0 — 2026-11-06
 
 - **The PC camera runs only while an app uses it.** macOS reports OBS's virtual camera as "in use" whenever OBS feeds it, which kept the webcam on all the time. Now the virtual camera stays off while idle; when an app opens "OBS Virtual Camera", the webcam, its microphone and OBS start. MirrorMagic follows the macOS CoreMediaIO log for camera-control events (the method Objective-See's OverSight uses); when an app releases the camera, it checks once whether anyone still watches and turns everything off. During a call there is no interruption except a 10-minute safety check. Without access to that log it falls back to a check every 45 s (OBS paused for about half a second).

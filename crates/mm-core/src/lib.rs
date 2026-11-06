@@ -1,5 +1,6 @@
 //! MirrorMagic core: wire protocol, encrypted channel and the platform-independent KVM logic.
 pub mod camdemand;
+pub mod files;
 pub mod keymap;
 pub mod primary;
 pub mod proto;

@@ -311,6 +311,38 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                 let _ = utx.send(Msg::DdcResult { ok: r.is_ok(), detail: r.unwrap_or_else(|e| e) });
             });
         }
+        Msg::FilesOffer { id, count, bytes, names } => {
+            // files copied on the PC: fetch them on a separate connection, then put them on the clipboard
+            status::log(format!("clipboard: PC offers {count} file(s) {names:?}"));
+            status::update(|s| s.clipboard = format!("receiving {count} file(s)…"));
+            RT.get().unwrap().spawn(async move {
+                let r: Result<(), secure::Error> = async {
+                    let (mut tx, mut rx, _, _) = open(Channel::Files).await?;
+                    tx.send(&Msg::FilesPull { id }).await?;
+                    clipboard::receive_files(&mut rx, id, bytes).await
+                }
+                .await;
+                if let Err(e) = r {
+                    status::log(format!("clipboard: file transfer failed: {e}"));
+                    status::update(|s| s.clipboard = format!("file transfer failed: {e}"));
+                }
+            });
+        }
+        Msg::FilesPushRequest { id } => {
+            // the PC wants the files this Mac offered
+            let Some(plan) = clipboard::outgoing(id) else { return };
+            RT.get().unwrap().spawn(async move {
+                let r: Result<(), secure::Error> = async {
+                    let (mut tx, _rx, _, _) = open(Channel::Files).await?;
+                    tx.send(&Msg::FilesPush { id }).await?;
+                    mm_core::files::send(&mut tx, &plan).await?;
+                    tokio::time::sleep(Duration::from_secs(1)).await; // let the last bytes drain
+                    Ok(())
+                }
+                .await;
+                status::log(format!("clipboard: pushed files to the PC: {r:?}"));
+            });
+        }
         Msg::Clipboard { text, html, png } => {
             std::thread::spawn(move || clipboard::receive(text, html, png));
         }
