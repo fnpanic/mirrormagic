@@ -47,12 +47,34 @@ impl Secondary {
         self.active.map(|a| a.mode)
     }
 
-    /// Returns the absolute point to warp the cursor to.
-    pub fn enter(&mut self, mode: Mode, side: Side, along: f32) -> (f64, f64) {
-        let area = match mode {
+    fn area_for(&self, mode: Mode) -> Rect {
+        match mode {
             Mode::Edge => self.displays.edge,
             Mode::Monitor => self.displays.monitor.unwrap_or(self.displays.edge),
-        };
+        }
+    }
+
+    /// A new display layout. macOS applies changes asynchronously (e.g. just after mirroring
+    /// starts), so an area read too early is stale and would pin the cursor to one of its edges:
+    /// an active session moves to the new area, at the real cursor position if that lies inside.
+    pub fn set_displays(&mut self, displays: Displays, os_pos: Option<(f64, f64)>) {
+        self.displays = displays;
+        let Some(mode) = self.mode() else { return };
+        let area = self.area_for(mode);
+        let a = self.active.as_mut().unwrap();
+        if a.area == area {
+            return;
+        }
+        a.area = area;
+        a.pos = os_pos.filter(|p| area.contains(p.0, p.1)).unwrap_or(match mode {
+            Mode::Monitor => area.center(),
+            Mode::Edge => (a.pos.0.clamp(area.x, area.x + area.w - 1.0), a.pos.1.clamp(area.y, area.y + area.h - 1.0)),
+        });
+    }
+
+    /// Returns the absolute point to warp the cursor to.
+    pub fn enter(&mut self, mode: Mode, side: Side, along: f32) -> (f64, f64) {
+        let area = self.area_for(mode);
         let a = (along as f64).clamp(0.0, 1.0);
         let pos = match mode {
             Mode::Monitor => area.center(),
@@ -135,6 +157,28 @@ mod tests {
         assert!(matches!(m.motion(1, 0, Some((10.0, 10.0))), Some(Effect::MoveTo { x, .. }) if x == 4287.0));
         m.displays.monitor = None;
         assert_eq!(m.enter(Mode::Monitor, Side::Right, 0.0), (864.0, 558.5)); // falls back to built-in
+    }
+
+    #[test]
+    fn stale_monitor_area_heals_when_the_layout_arrives() {
+        // extended layout: the monitor sits above the laptop; mirroring then moves it to 0,0
+        let mut m = Secondary::new(Displays {
+            edge: Rect { x: 0.0, y: 0.0, w: 1728.0, h: 1117.0 },
+            monitor: Some(Rect { x: 0.0, y: -1440.0, w: 2560.0, h: 1440.0 }),
+        });
+        m.enter(Mode::Monitor, Side::Right, 0.5);
+        // the bug: with the old area every move down is clamped to its bottom row, y = -1
+        assert!(matches!(m.motion(0, 1000, None), Some(Effect::MoveTo { y, .. }) if y == -1.0));
+        let mirrored = Displays { edge: Rect { x: 0.0, y: 0.0, w: 2560.0, h: 1440.0 }, monitor: Some(Rect { x: 0.0, y: 0.0, w: 2560.0, h: 1440.0 }) };
+        m.set_displays(mirrored.clone(), Some((1280.0, 0.0))); // macOS clamped the cursor to the top
+        assert_eq!(m.motion(0, 300, Some((1280.0, 0.0))), Some(Effect::MoveTo { x: 1280.0, y: 300.0, dx: 0.0, dy: 300.0 }));
+        // same layout again: nothing moves
+        m.set_displays(mirrored, Some((5.0, 5.0)));
+        assert_eq!(m.motion(0, 0, None), Some(Effect::MoveTo { x: 1280.0, y: 300.0, dx: 0.0, dy: 0.0 }));
+        // inactive: just stored
+        m.exit();
+        m.set_displays(Displays { edge: Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, monitor: None }, None);
+        assert_eq!(m.enter(Mode::Monitor, Side::Right, 0.0), (50.0, 50.0));
     }
 
     #[test]

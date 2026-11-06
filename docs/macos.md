@@ -41,3 +41,13 @@ Then run `bash ~/mirrormagic-build/build-on-mac.sh` in a Terminal on the Mac. Th
 5. Replaces `/Applications/MirrorMagic.app` and starts it.
 
 The log goes to `~/mirrormagic-build/build.log`.
+
+### Builds without typing on the Mac
+
+Other agents often drive the Mac's screen, so typed commands can collide with them. `scripts/mac/install-runner.sh` installs a LaunchAgent (`com.mirrormagic.buildrunner`, launchd `QueueDirectories`), so builds start from file transfer alone. Run it once in a Terminal on the Mac, after uploading it together with `runner.sh` to `~/mirrormagic-build/`:
+
+```bash
+bash ~/mirrormagic-build/install-runner.sh <commit>   # also queues a build of src-<commit>.tgz
+```
+
+After that, each build is: upload `src-<commit>.tgz` (and the p12 files into `sign/`), then upload any file named `<commit>` into `~/mirrormagic-build/queue/`. `runner.sh` removes it and runs `build-on-mac.sh`; its own log is `runner.log`. Anyone who can write into `queue/` can build and run code as the user; that is the same trust as the Tether access used to upload.

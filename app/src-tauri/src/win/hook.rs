@@ -51,7 +51,7 @@ unsafe extern "system" fn mouse_proc(code: i32, w: WPARAM, l: LPARAM) -> LRESULT
                 WM_MBUTTONDOWN => crate::pc::on_button(Button::Middle, true),
                 WM_MBUTTONUP => crate::pc::on_button(Button::Middle, false),
                 WM_XBUTTONDOWN | WM_XBUTTONUP => {
-                    let b = if hi == XBUTTON1 as u16 { Button::Back } else { Button::Forward };
+                    let b = if hi == XBUTTON1 { Button::Back } else { Button::Forward };
                     crate::pc::on_button(b, w as u32 == WM_XBUTTONDOWN)
                 }
                 WM_MOUSEWHEEL => crate::pc::on_wheel(0, hi as i16 as i32),

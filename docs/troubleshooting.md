@@ -11,4 +11,5 @@
 | Wrong characters on the Mac | Mapping is positional; the Mac's layout decides. Try "German AltGr keys" On/Off. |
 | Clipboard didn't come along | The clipboard is handed over when you switch, not continuously. Copy, then cross. Is "Share the clipboard" on (both sides)? |
 | Camera stays black | OBS installed and set up? Is "OBS Virtual Camera" selected in the app? Is another Windows app using the webcam? The PC window shows the camera status. |
+| Monitor mode: the Mac cursor sticks to the top (or another) edge | Displays changed after the switch (mirroring settles asynchronously, HDMI re-plugged, resolution changed). Since 0.5.1 the Mac re-reads the layout every 500 ms while you control it, and the cursor frees itself within half a second. MirrorMagic.log shows `enter … in Displays{…}` and `displays changed while in control`. |
 | Invisible cursor on the PC after a crash | Start MirrorMagic again (it restores the cursor scheme), or sign out and in. |

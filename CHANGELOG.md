@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — 2026-11-06
+
+- **Fixed: after a monitor switch the Mac cursor could stick to the top edge** and only move sideways until the next switch. macOS applies the mirror layout asynchronously; when the shared monitor's area was read before it moved (from above the laptop screen to 0,0), every move was clamped into the old rectangle. While the PC controls it, the Mac now re-reads the display layout every 500 ms and moves the session to the new area. That also covers HDMI re-plugs and resolution changes mid-session.
+- Mac builds can start without typing on the Mac: a LaunchAgent build runner, triggered by file transfer (see docs/macos.md).
+
 ## 0.5.0 — 2026-11-06
 
 - **Copy files through the clipboard.** Copy files or folders in Explorer or Finder, switch to the other machine, paste. They travel on their own encrypted connection, so input never waits behind a big file. The status shows progress, and the files land in a temporary MirrorMagic folder that is cleaned after a day. Paths from the peer are sanitised (no `..`, absolute paths or drive letters). Limits: 4 GB and 50,000 items per copy.

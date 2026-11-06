@@ -10,7 +10,7 @@ use inject::Injector;
 use mm_core::proto::{Channel, Mode, Msg, DEFAULT_PORT, PROTOCOL_VERSION};
 use mm_core::secondary::{Displays, Effect, Secondary};
 use mm_core::secure;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::net::{TcpStream, UdpSocket};
@@ -52,7 +52,7 @@ fn refresh() -> Msg {
     let ds = sys::displays();
     if let Some((edge, monitor)) = sys::layout(&ds) {
         let mut s = sec();
-        s.displays = Displays { edge, monitor };
+        s.set_displays(Displays { edge, monitor }, inject::cursor());
         s.speed = c.speed;
     }
     {
@@ -259,6 +259,24 @@ fn mirror(on: bool) {
     }
 }
 
+/// While the PC moves the cursor: has the display layout changed since it was read (macOS still
+/// settling after mirroring, HDMI re-plugged, resolution changed)? Checked at most every 500 ms.
+fn displays_changed() -> bool {
+    static LAST_MS: AtomicU64 = AtomicU64::new(0);
+    let now = T0.get().unwrap().elapsed().as_millis() as u64;
+    if now.saturating_sub(LAST_MS.load(Ordering::Relaxed)) < 500 {
+        return false;
+    }
+    LAST_MS.store(now, Ordering::Relaxed);
+    let ds = sys::displays();
+    let Some((edge, monitor)) = sys::layout(&ds) else { return false };
+    let changed = sec().displays != Displays { edge, monitor };
+    if changed {
+        status::log(format!("displays changed while in control: {ds:?}"));
+    }
+    changed
+}
+
 fn set_control(c: &str) {
     let c = c.to_string();
     status::update(|s| s.control = c);
@@ -267,15 +285,18 @@ fn set_control(c: &str) {
 fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
     match m {
         Msg::Enter { mode, side, along } => {
-            status::log(format!("enter {mode:?}"));
             mirror(mode == Mode::Monitor);
             let info = refresh(); // displays may have changed (HDMI plugged, lid closed)
             let _ = utx.send(info);
             let (x, y) = sec().enter(mode, side, along);
             inj().warp(x, y);
+            status::log(format!("enter {mode:?} at {x:.0},{y:.0} in {:?}", sec().displays));
             set_control(if mode == Mode::Monitor { "monitor" } else { "edge" });
         }
         Msg::Motion { dx, dy } => {
+            if displays_changed() {
+                let _ = utx.send(refresh());
+            }
             let os = inject::cursor();
             let effect = sec().motion(dx, dy, os);
             match effect {
