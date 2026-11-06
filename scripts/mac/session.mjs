@@ -5,8 +5,10 @@
 //   node session.mjs shot <png>                  save the remote screen
 //   node session.mjs keys <A+B> [<C> ...]        press key combos (DOM codes, e.g. MetaLeft+Space)
 //   node session.mjs paste <text|@file>          paste text via clipboard sync (layout-safe), Windows clipboard restored
-//   node session.mjs put <local> <remote>        upload a file   (needs a --file-transfer session)
-//   node session.mjs get <remote> <local>        download a file (needs a --file-transfer session)
+//   node session.mjs put <local> <remote-file>   upload a file   (needs a --file-transfer session)
+//   node session.mjs get <remote> <local-file>   download a file (needs a --file-transfer session)
+//   Both targets are FULL file paths: a folder as target reports job_done but writes nothing.
+//   Existing targets are not overwritten (the job waits on an override prompt): use new names.
 // Git Bash: run with MSYS_NO_PATHCONV=1 or /Users/... paths get rewritten into Windows paths.
 // Env: TETHER_EXE, MAC_ID (default 128974683), password from C:\vms\mac.pw (never printed).
 import { createRequire } from "module";
