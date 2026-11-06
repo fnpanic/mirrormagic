@@ -326,7 +326,7 @@ fn hdmi_off() {
         return;
     }
     let Some(id) = sys::external_display() else { return };
-    let r = sys::set_display_enabled(&[id], false);
+    let r = sys::set_display_enabled(id, false);
     match &r {
         Ok(()) => {
             *HDMI_OFF.lock().unwrap() = Some(id);
@@ -350,26 +350,28 @@ fn hdmi_restore() {
         config::update(|c| c.hdmi_off = None); // nothing was left off
         return;
     }
-    let r = sys::set_display_enabled(&ids, true);
+    // unknown ids fail at once (complete error 1001)
+    let r: Vec<(u32, Result<(), String>)> = ids.into_iter().map(|id| (id, sys::set_display_enabled(id, true))).filter(|x| x.1.is_ok()).collect();
     for _ in 0..30 {
         if sys::external_display().is_some() {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    status::log(format!("start: HDMI output left off by an earlier run? on: {:?} (record {known:?}, result {r:?})", sys::external_display()));
+    status::log(format!("start: HDMI output left off by an earlier run? on: {:?} (record {known:?}, turned on {r:?})", sys::external_display()));
     config::update(|c| c.hdmi_off = None);
 }
 
 /// MirrorMagic quits: give the Mac its monitor back (macOS would keep it off).
 pub fn shutdown() {
+    drop(AUDIO_DEVS.lock().unwrap().take());
     hdmi_on("MirrorMagic quits");
 }
 
 /// Monitor mode (or no PC for a while): turn the HDMI output on and wait until it is online.
 fn hdmi_on(why: &str) {
     let Some(id) = HDMI_OFF.lock().unwrap().take() else { return };
-    let r = sys::set_display_enabled(&[id], true);
+    let r = sys::set_display_enabled(id, true);
     config::update(|c| c.hdmi_off = None);
     for _ in 0..30 {
         if sys::external_display().is_some() {
@@ -652,6 +654,9 @@ async fn camera_stream() {
 
 // ---------------------------------------------------------------- PC microphone / speakers
 
+/// The audio devices; removed on quit (coreaudiod would keep them, with a dead tap).
+static AUDIO_DEVS: Mutex<Option<vaudio::Devices>> = Mutex::new(None);
+
 /// Provides "PC Microphone" and "PC Speakers" (vaudio.rs) and connects them to the PC while an
 /// app on the Mac uses them.
 fn audio_watch() {
@@ -669,14 +674,16 @@ fn audio_watch() {
     }
     let (devs, log) = vaudio::create(me);
     status::log(format!("audio devices: {log:?}"));
+    let (mic, speaker) = (devs.mic, devs.speaker);
+    *AUDIO_DEVS.lock().unwrap() = Some(devs);
     let (wtx, _) = watch::channel((false, false));
     let mut task: Option<tokio::task::JoinHandle<()>> = None;
     let mut last = (false, false);
     loop {
         std::thread::sleep(Duration::from_secs(1));
         let want = (
-            devs.mic.is_some_and(|d| vaudio::used_by_others(d, true, me)),
-            devs.speaker.is_some_and(|d| vaudio::used_by_others(d, false, me)),
+            mic.is_some_and(|d| vaudio::used_by_others(d, true, me)),
+            speaker.is_some_and(|d| vaudio::used_by_others(d, false, me)),
         );
         if want != last {
             status::log(format!("audio: an app uses PC Microphone {}, PC Speakers {}", want.0, want.1));

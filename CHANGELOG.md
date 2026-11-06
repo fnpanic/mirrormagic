@@ -5,7 +5,8 @@
 - **Fix for 0.5.11: monitor mode failed after a MirrorMagic restart.** macOS keeps a display that MirrorMagic switched off off, even after MirrorMagic quits. After the update to 0.5.12, the new instance saw no external display and didn't know its ID. Ctrl+Alt+M then failed with `mirror true failed: no external display connected` (Mac log 18:56:02). Now:
   - MirrorMagic records the switched-off display in its config (`hdmi_off`).
   - It turns the display back on when it quits.
-  - At start it turns on a display left off by an earlier run (after an update or crash). Without a record, it tries every display ID that isn't online. The 2 s check then switches it off again while the PC is connected.
+  - At start it turns on a display left off by an earlier run (after an update or crash). Without a record, it tries every display ID that isn't online. The 2 s check then switches it off again while the PC is connected. One display ID per reconfiguration: an unknown ID makes the whole reconfiguration fail (`complete error 1001`, seen on the first 0.5.13 build).
+- **Fix for 0.5.12: "PC Microphone"/"PC Speakers" after a restart.** Public aggregate devices outlive the app; coreaudiod keeps them, with a dead tap inside. The second start found their IDs taken (`error 'nope'`): "PC Speakers" was missing, and a second, dead "PC Microphone" existed. MirrorMagic now removes the devices when it quits, and at start removes any left by an earlier run before creating them again under the same ID (Teams keeps the selection).
 - Verified on the real machines (0.5.11/0.5.12): with the Mac awake, the PC screen was turned off at 18:42 and 18:47. The Mac logged `PC screen off`, but its HDMI output stayed off (no `HDMI output on`, no re-plug), so the monitor had no Mac signal to switch to. Before, at 18:10, the PC found the monitor on HDMI (`monitor input Some(17)`).
 
 ## 0.5.12 — 2026-11-06 (protocol 6)

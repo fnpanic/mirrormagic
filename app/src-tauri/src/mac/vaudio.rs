@@ -158,10 +158,30 @@ impl Drop for Devices {
     }
 }
 
+const UIDS: [&str; 5] = ["app.mirrormagic.mic", "app.mirrormagic.mic2", "app.mirrormagic.speakers", "app.mirrormagic.spktap", "app.mirrormagic.spktap2"];
+
+/// Public aggregate devices outlive the process that made them (coreaudiod keeps them), with a
+/// dead tap inside: remove the ones an earlier run left.
+fn destroy_stale(log: &mut Vec<String>) {
+    for uid in UIDS {
+        let q = CFString::new(uid);
+        let r = q.as_concrete_TypeRef();
+        let a = Addr { selector: cc(b"uidd"), scope: GLOBAL, element: 0 };
+        let (mut id, mut size) = (0u32, 4u32);
+        let qp = &r as *const CFStringRef as *const c_void;
+        let ok = unsafe { AudioObjectGetPropertyData(SYSTEM, &a, std::mem::size_of::<CFStringRef>() as u32, qp, &mut size, &mut id as *mut u32 as *mut c_void) } == 0;
+        if ok && id != 0 {
+            let e = unsafe { AudioHardwareDestroyAggregateDevice(id) };
+            log.push(format!("removed stale {uid} (device {id}): {e}"));
+        }
+    }
+}
+
 /// Creates both devices; `me` is this process's audio object. Each half fails on its own.
 pub fn create(me: u32) -> (Devices, Vec<String>) {
     let mut d = Devices { mic: None, speaker: None, taps: vec![], devs: vec![] };
     let mut log = vec![];
+    destroy_stale(&mut log);
     // the real output to play through: the default output at start, unless it is ours
     let out = get::<u32>(SYSTEM, cc(b"dOut"), None).and_then(device_uid).filter(|u| !u.starts_with("app.mirrormagic"));
 

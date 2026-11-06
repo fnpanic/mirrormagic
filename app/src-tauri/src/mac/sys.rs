@@ -99,11 +99,11 @@ pub fn online_ids() -> Vec<u32> {
     online_displays().iter().map(|d| d.id).collect()
 }
 
-/// Turns displays' output fully off, as if unplugged (what BetterDisplay calls "disconnect"),
-/// or back on, in one reconfiguration. A private SkyLight call: the only way without root.
+/// Turns a display's output fully off, as if unplugged (what BetterDisplay calls "disconnect"),
+/// or back on. One id per call: an unknown id makes the whole reconfiguration fail. A private SkyLight call: the only way without root.
 /// Despite "for this app only", macOS keeps a display off after the app ends (seen on 0.5.11 →
 /// 0.5.12): MirrorMagic records it and turns it on again (config `hdmi_off`).
-pub fn set_display_enabled(ids: &[u32], on: bool) -> Result<(), String> {
+pub fn set_display_enabled(id: u32, on: bool) -> Result<(), String> {
     type Enable = unsafe extern "C" fn(*mut c_void, u32, bool) -> i32;
     let f = unsafe {
         let h = dlopen(c"/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight".as_ptr(), 1);
@@ -113,20 +113,24 @@ pub fn set_display_enabled(ids: &[u32], on: bool) -> Result<(), String> {
         }
         std::mem::transmute::<*mut c_void, Enable>(p)
     };
-    let mut cfg = std::ptr::null_mut();
-    if unsafe { CGBeginDisplayConfiguration(&mut cfg) } != 0 {
-        return Err("display config failed".into());
+    let mut errs = vec![];
+    for option in [0, 1] {
+        // 0 = kCGConfigureForAppOnly, 1 = kCGConfigureForSession (if the first is refused)
+        let mut cfg = std::ptr::null_mut();
+        if unsafe { CGBeginDisplayConfiguration(&mut cfg) } != 0 {
+            return Err("display config failed".into());
+        }
+        let e = unsafe { f(cfg, id, on) };
+        if e != 0 {
+            unsafe { CGCancelDisplayConfiguration(cfg) };
+            return Err(format!("enable {on}: error {e}"));
+        }
+        match unsafe { CGCompleteDisplayConfiguration(cfg, option) } {
+            0 => return Ok(()),
+            e => errs.push(e),
+        }
     }
-    // unknown ids (probing at start) fail on their own; the others still apply
-    let errs: Vec<i32> = ids.iter().map(|&id| unsafe { f(cfg, id, on) }).filter(|&e| e != 0).collect();
-    if errs.len() == ids.len() {
-        unsafe { CGCancelDisplayConfiguration(cfg) };
-        return Err(format!("enable {on}: errors {errs:?}"));
-    }
-    match unsafe { CGCompleteDisplayConfiguration(cfg, 0) } {
-        0 => Ok(()), // 0 = kCGConfigureForAppOnly
-        e => Err(format!("enable {on}: complete error {e}")),
-    }
+    Err(format!("enable {on}: complete errors {errs:?}"))
 }
 
 pub fn rect(d: &DisplayInfo) -> Rect {
