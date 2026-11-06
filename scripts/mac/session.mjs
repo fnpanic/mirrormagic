@@ -53,8 +53,12 @@ async function combo(p, key, spec) {
 }
 async function transfer(p, key, from, to, isRemote) {
   return p.evaluate(async ([k, f, t, rem]) => {
-    const T = window.__TAURI_INTERNALS__; const id = 20000 + Math.floor(Math.random() * 9000); let res = null;
-    const h = await T.invoke("plugin:event|listen", { event: "session", target: { kind: "Any" }, handler: T.transformCallback((e) => { const n = e.payload?.name; if ((n === "job_done" || n === "job_error") && e.payload.payload?.id === id) res = n + " " + JSON.stringify(e.payload.payload).slice(0, 200); }) });
+    const T = window.__TAURI_INTERNALS__; const id = 20000 + Math.floor(Math.random() * 9000); let res = null, listed = false;
+    const h = await T.invoke("plugin:event|listen", { event: "session", target: { kind: "Any" }, handler: T.transformCallback((e) => { const n = e.payload?.name; if (n === "folder_files") listed = true; if ((n === "job_done" || n === "job_error") && e.payload.payload?.id === id) res = n + " " + JSON.stringify(e.payload.payload).slice(0, 200); }) });
+    // jobs sent before the remote side has answered a listing are silently lost: list first
+    const remoteDir = rem ? f.replace(/\/[^/]*$/, "") || "/" : t;
+    await T.invoke("fs_remote_dir", { key: k, path: remoteDir, hidden: false }).catch(() => {});
+    for (let i = 0; i < 40 && !listed; i++) await new Promise((s) => setTimeout(s, 250));
     const inv = await T.invoke("fs_transfer", { key: k, id, path: f, to: t, fileNum: 0, hidden: false, isRemote: rem }).then(() => "ok", (e) => "ERR " + e);
     for (let i = 0; i < 480 && !res && inv === "ok"; i++) await new Promise((s) => setTimeout(s, 500));
     await T.invoke("plugin:event|unlisten", { event: "session", eventId: h }).catch(() => {});
@@ -68,11 +72,6 @@ if (cmd === "start") {
   const env = { ...process.env, TETHER_PROFILE: "mm-" + PORT, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${PORT}`, MMPW: pw };
   const pid = execFileSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(HERE, "hidden-run.ps1"), "-Exe", EXE, "-Desktop", "mm-mac-" + PORT, "-Args", `--connect ${MAC_ID} --password-env MMPW ${args.join(" ")}`], { env }).toString().trim();
   const [b, p] = await page();
-  // file transfer: jobs issued before the remote listing has loaded are silently lost
-  for (let i = 0; i < 100 && args.includes("--file-transfer"); i++) {
-    if (await p.evaluate(() => /\b(Desktop|Downloads|Library)\b[\s\S]*\b(Desktop|Downloads|Library)\b/.test(document.body.innerText))) break;
-    await sleep(200);
-  }
   for (let i = 0; i < 150 && !args.includes("--file-transfer"); i++) {
     if (await p.evaluate(() => { const c = document.querySelector("canvas"); return !!c && !(c.width === 300 && c.height === 150); })) break;
     await sleep(200);
