@@ -25,6 +25,8 @@ static CAM_WANTED: AtomicBool = AtomicBool::new(false);
 pub static CAM_MANUAL: AtomicBool = AtomicBool::new(false);
 static RT: OnceLock<tokio::runtime::Handle> = OnceLock::new();
 static T0: OnceLock<Instant> = OnceLock::new();
+/// Protocol version agreed with the PC.
+static PEER_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(PROTOCOL_VERSION);
 
 fn inj() -> std::sync::MutexGuard<'static, Injector> {
     INJ.get().unwrap().lock().unwrap_or_else(|e| e.into_inner())
@@ -159,6 +161,7 @@ async fn open(channel: Channel) -> Result<(secure::Sender, secure::Receiver, Str
     if !(mm_core::proto::MIN_COMPATIBLE_VERSION..=PROTOCOL_VERSION).contains(&version) {
         return Err(format!("{name} runs an incompatible MirrorMagic version").into());
     }
+    PEER_VERSION.store(version, Ordering::SeqCst);
     Ok((tx, rx, name, host))
 }
 
@@ -206,8 +209,15 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
         let utx = utx.clone();
         tokio::spawn(async move {
             let mut could = sys::can_inject(false);
+            let mut reported: Option<Instant> = None;
             loop {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                // someone works on the Mac: keep the PC screen on (else the monitor shows the Mac's second screen)
+                let since = reported.map_or(f64::MAX, |r| r.elapsed().as_secs_f64());
+                if PEER_VERSION.load(Ordering::SeqCst) >= 5 && mm_core::secondary::mac_active_due(sys::idle_seconds(), since) {
+                    reported = Some(Instant::now());
+                    let _ = utx.send(Msg::MacActive);
+                }
                 let can = sys::can_inject(false);
                 if can != could {
                     could = can; // Accessibility granted/revoked: tell the PC right away

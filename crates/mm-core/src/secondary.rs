@@ -21,6 +21,16 @@ pub enum Effect {
     Leave { along: f32, park: (f64, f64) },
 }
 
+/// Mac → PC "in use" reports: only while the Mac had input within this many seconds, and at most
+/// this often. Windows' shortest display timeout is a minute, so 30 s keeps the PC screen on.
+pub const ACTIVE_EVERY_S: f64 = 30.0;
+
+/// Should the Mac tell the PC it is in use? `idle_s`: seconds since the Mac's last input;
+/// `since_report_s`: seconds since the last report.
+pub fn mac_active_due(idle_s: f64, since_report_s: f64) -> bool {
+    idle_s < ACTIVE_EVERY_S && since_report_s >= ACTIVE_EVERY_S
+}
+
 /// A real cursor position this far (points) from the tracked one means the Mac's own trackpad moved it.
 const OS_MOVED: f64 = 3.0;
 /// How far inside the shared edge the Mac's cursor waits after handing control back.
@@ -209,6 +219,13 @@ mod tests {
         assert_eq!(last, (4008.0, 520.0));
         // a real trackpad move (far from the tracked position) is still followed
         assert_eq!(m.motion(0, 1, Some((2000.0, 600.0))), Some(Effect::MoveTo { x: 2000.0, y: 601.0, dx: 0.0, dy: 1.0 }));
+    }
+
+    #[test]
+    fn the_mac_reports_use_every_30_s_only_while_someone_works_on_it() {
+        assert!(mac_active_due(2.0, 31.0));
+        assert!(!mac_active_due(2.0, 10.0)); // reported recently
+        assert!(!mac_active_due(45.0, 120.0)); // nobody at the Mac: let the PC screen sleep
     }
 
     #[test]

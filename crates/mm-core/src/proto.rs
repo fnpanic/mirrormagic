@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
-pub const PROTOCOL_VERSION: u32 = 4; // 3: clipboard files, 4: PcDisplay
+pub const PROTOCOL_VERSION: u32 = 5; // 3: clipboard files, 4: PcDisplay, 5: MacActive
 /// Oldest peer version still understood: newer versions only append messages, so the PC answers
 /// with the lower of both versions and never sends a peer messages it does not know.
 pub const MIN_COMPATIBLE_VERSION: u32 = 2;
@@ -122,6 +122,9 @@ pub enum Msg {
     FilesEnd,
     /// Control, PC → Mac: Windows turned its screen off (user away) or on again.
     PcDisplay { on: bool },
+    /// Control, Mac → PC: someone uses the Mac right now (input within the last 30 s). The PC
+    /// keeps its screen awake, so the monitor does not fall back to the Mac's HDMI signal.
+    MacActive,
 }
 
 pub fn encode(msg: &Msg) -> Vec<u8> {

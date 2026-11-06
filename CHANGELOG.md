@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.7 — 2026-11-06
+
+- **The PC screen stays on while you work on the Mac with its own keyboard and trackpad.** Windows saw no input and turned its screen off after its timeout. The monitor's auto input detection then jumped to the Mac's HDMI signal and showed the Mac's second screen while you were working on the MacBook. While the Mac has input, it now tells the PC every 30 s (protocol 5), and the PC resets its display timer. When you are away from both, the PC screen turns off as usual, and the Mac puts its displays to sleep after 60 s (0.5.6). The away test of 0.5.6 showed the gap: the Mac received "PC screen off" but was in use, so it rightly kept its displays on.
+
 ## 0.5.6 — 2026-11-06
 
 - **Fixed: the Mac cursor was sometimes pulled left or right on its own** (PC fix). While you control the Mac, the PC's hidden cursor waits at a park point and every move is sent as the distance from it. Moves that slipped past the input hook (during its 2 s re-install, or a hook Windows dropped) shifted the hidden cursor, and every later move carried that shift as a constant offset, so the Mac cursor drifted toward one side until the next switch. Each move is now measured from where the hidden cursor really is.

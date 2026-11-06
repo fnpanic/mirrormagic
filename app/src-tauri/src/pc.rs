@@ -400,6 +400,15 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
                         run(out);
                     }
                 }
+                Msg::MacActive => {
+                    win::keep_display_on(); // the user works on the Mac
+                    static LOGGED: AtomicU64 = AtomicU64::new(0);
+                    let now = T0.get().unwrap().elapsed().as_secs();
+                    if now.saturating_sub(LOGGED.load(Ordering::Relaxed)) >= 600 || LOGGED.load(Ordering::Relaxed) == 0 {
+                        LOGGED.store(now.max(1), Ordering::Relaxed);
+                        std::thread::spawn(|| status::log("Mac in use: keeping the PC screen on"));
+                    }
+                }
                 Msg::DdcResult { ok, detail } => status::update(|s| s.ddc.last = if ok { format!("Mac: {detail}") } else { format!("Mac could not switch: {detail}") }),
                 Msg::Clipboard { text, html, png } => {
                     std::thread::spawn(move || clipboard::receive(text, html, png));
