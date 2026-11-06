@@ -373,6 +373,7 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
         Channel::Control => control(tx, rx, name, addr.ip().to_string()).await,
         Channel::Camera => camera_channel(tx, rx).await,
         Channel::Files => files_channel(tx, rx).await,
+        Channel::Audio => audio_channel(tx, rx).await,
     }
 }
 
@@ -485,7 +486,7 @@ static AUD_TX: Mutex<Option<mpsc::Sender<Msg>>> = Mutex::new(None);
 /// Stops the running microphone capture.
 static MIC_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = Mutex::new(None);
 
-/// The PC microphone streams together with the camera (an app on the Mac opened it).
+/// The PC microphone streams while an app on the Mac records from "PC Microphone".
 fn mic_wanted(on: bool) {
     let mut m = MIC_STOP.lock().unwrap();
     if let Some(stop) = m.take() {
@@ -497,7 +498,7 @@ fn mic_wanted(on: bool) {
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     *m = Some(stop.clone());
     std::thread::spawn(move || {
-        let r = crate::audio::capture(stop, |rate, pcm| {
+        let r = crate::audio::capture(None, stop, |rate, pcm| {
             if let Some(tx) = AUD_TX.lock().unwrap().as_ref() {
                 let _ = tx.try_send(Msg::Audio { rate, pcm });
             }
@@ -510,7 +511,6 @@ fn mic_wanted(on: bool) {
 fn camera_wanted(on: bool) {
     status::update(|s| s.camera_wanted = on);
     status::log(format!("camera wanted: {on}"));
-    mic_wanted(on);
     let mut cap = CAPTURE.lock().unwrap();
     if !on {
         *cap = None; // Drop stops the capture thread → camera light off
@@ -555,14 +555,10 @@ fn camera_wanted(on: bool) {
 
 async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(), secure::Error> {
     let (ftx, mut frx) = mpsc::channel::<Vec<u8>>(2);
-    let (atx, mut arx) = mpsc::channel::<Msg>(64);
     let me = CAM_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
     *CAM_TX.lock().unwrap() = Some(ftx);
-    *AUD_TX.lock().unwrap() = Some(atx);
     let r = loop {
         tokio::select! {
-            biased; // audio first: 10 ms chunks must not wait behind video frames
-            a = arx.recv() => if let Some(m) = a { if let Err(e) = tx.send(&m).await { break Err(e) } },
             f = frx.recv() => match f {
                 Some(jpeg) => if let Err(e) = tx.send(&Msg::Frame { jpeg }).await { break Err(e) },
                 None => break Ok(()),
@@ -573,7 +569,54 @@ async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Res
     let mut tx = CAM_TX.lock().unwrap();
     if CAM_CHAN.load(Ordering::SeqCst) == me {
         *tx = None;
+    }
+    r
+}
+
+/// Generation of the current audio channel, so an old channel can't clear a newer one's sender.
+static AUD_CHAN: AtomicU64 = AtomicU64::new(0);
+
+/// Opened by the Mac while an app there uses "PC Microphone" or "PC Speakers": the microphone
+/// goes out, the Mac's call sound comes in and plays on the PC's default output.
+async fn audio_channel(mut tx: secure::Sender, rx: secure::Receiver) -> Result<(), secure::Error> {
+    let (reader, mut rx) = crate::audio::reader(rx);
+    let (atx, mut arx) = mpsc::channel::<Msg>(64);
+    let me = AUD_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
+    *AUD_TX.lock().unwrap() = Some(atx);
+    let mut speaker = crate::audio::Player::default();
+    let mut want = (false, false);
+    let r = loop {
+        tokio::select! {
+            a = arx.recv() => if let Some(m) = a { if let Err(e) = tx.send(&m).await { break Err(e) } },
+            m = rx.recv() => match m.unwrap_or(Err("closed".into())) {
+                Ok(Msg::AudioWant { mic, speaker: spk }) => {
+                    if want != (mic, spk) {
+                        status::log(format!("audio: Mac uses PC microphone {mic}, PC speakers {spk}"));
+                        if want.0 != mic {
+                            mic_wanted(mic);
+                        }
+                        if !spk {
+                            speaker.stop();
+                        }
+                        want = (mic, spk);
+                    }
+                }
+                Ok(Msg::Audio { rate, pcm }) => {
+                    if let Some(r) = speaker.push(rate, pcm) {
+                        status::log(format!("audio: Mac sound to the PC speakers at {rate} Hz: {r:?}"));
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => break Err(e),
+            },
+        }
+    };
+    reader.abort();
+    if AUD_CHAN.load(Ordering::SeqCst) == me {
         *AUD_TX.lock().unwrap() = None;
+        if want.0 {
+            mic_wanted(false);
+        }
     }
     r
 }

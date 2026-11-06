@@ -41,7 +41,10 @@ rand = "0.8"
 # media / brightness keys (NSSystemDefined events); already in the tree via tauri
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSGraphicsContext", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent", "CGEventTypes"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSArray", "NSValue", "NSString", "NSUUID"] }
+# "PC Microphone" / "PC Speakers" from Core Audio taps (no driver needed)
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "AudioHardware"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

@@ -237,7 +237,7 @@ function PcView(p: ViewProps) {
         <Row label="Status" hint={s.camera_detail || "Starts by itself when an app on the Mac opens “OBS Virtual Camera”"}>
           <span className={`text-caption ${s.camera_on ? "text-ok" : "text-muted"}`}>{s.camera_on ? "Streaming" : s.camera_wanted ? "Starting…" : "Idle"}</span>
         </Row>
-        <Row label="Microphone" hint={s.mic_detail || "The webcam microphone streams together with the camera"}>
+        <Row label="Microphone" hint={s.mic_detail || "Streams while a Mac app uses 'PC Microphone'"}>
           <Toggle label="Stream the webcam microphone" on={c.mic} onChange={(v) => save({ mic: v })} />
         </Row>
         <Row label="Resolution">
@@ -341,8 +341,8 @@ function MacView(p: ViewProps) {
         <Row label="Start automatically" hint={s.camera_detail || (s.camera_wanted ? "An app is using the camera" : "No app is using the camera")}>
           <Toggle label="Start the PC camera automatically" on={c.camera_auto} onChange={(v) => save({ camera_auto: v })} />
         </Row>
-        <Row label="PC microphone" hint={s.mic_detail || "Pick 'BlackHole 2ch' as the microphone in your app (install BlackHole 2ch once)"}>
-          <span className="text-caption text-muted">{s.camera_wanted ? "With the camera" : "Idle"}</span>
+        <Row label="PC audio" hint={s.mic_detail || "Pick 'PC Microphone' and 'PC Speakers' in Teams, Zoom or the browser"}>
+          <span className="text-caption text-muted">Allow "System Audio Recording" once</span>
         </Row>
         <Row label="Stream now" hint="Keep the PC camera on regardless">
           <ManualCamera />

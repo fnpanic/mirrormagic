@@ -4,6 +4,7 @@ pub mod camlog;
 pub mod inject;
 pub mod obs;
 pub mod sys;
+pub mod vaudio;
 
 use crate::{clipboard, config, ddc, mjpeg, status};
 use inject::Injector;
@@ -92,6 +93,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     rt.spawn(client_loop());
     status::log(format!("start: cameras {:?}", sys::cameras()));
     std::thread::spawn(camera_watch);
+    std::thread::spawn(audio_watch);
     if !c.obs_password.is_empty() && c.camera_auto {
         rt.spawn(async { setup_obs(true).await });
     } else {
@@ -598,45 +600,16 @@ async fn camera_stream() {
         match open(Channel::Camera).await {
             Ok((_tx, mut rx, _, _)) => {
                 status::log("camera stream: connected");
-                let (mut frames, mut speaker) = (0u64, None::<(u32, Arc<AtomicBool>, Arc<Mutex<std::collections::VecDeque<i16>>>)>);
+                let mut frames = 0u64;
                 // a dead connection (PC asleep, Wi-Fi roam) must not freeze OBS on the last frame
                 while let Ok(Ok(m)) = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await {
-                    match m {
-                        Msg::Frame { jpeg } => {
-                            frames += 1;
-                            if frames == 1 || frames % 300 == 0 {
-                                status::log(format!("camera stream: {frames} frames"));
-                            }
-                            let _ = FRAMES.get().unwrap().send(Some(Arc::new(jpeg)));
+                    if let Msg::Frame { jpeg } = m {
+                        frames += 1;
+                        if frames == 1 || frames % 300 == 0 {
+                            status::log(format!("camera stream: {frames} frames"));
                         }
-                        Msg::Audio { rate, pcm } => {
-                            if speaker.as_ref().map(|s| s.0) != Some(rate) {
-                                if let Some((_, stop, _)) = speaker.take() {
-                                    stop.store(true, Ordering::SeqCst);
-                                }
-                                let stop = Arc::new(AtomicBool::new(false));
-                                match tokio::task::spawn_blocking({ let s = stop.clone(); move || crate::audio::play("BlackHole", rate, s) }).await {
-                                    Ok(Ok(q)) => {
-                                        status::update(|s| s.mic_detail = "PC microphone → BlackHole 2ch".into());
-                                        speaker = Some((rate, stop, q));
-                                    }
-                                    r => {
-                                        let e = format!("PC microphone: {:?}", r.map(|x| x.err()));
-                                        status::log(&e);
-                                        status::update(|s| s.mic_detail = "Install BlackHole 2ch to use the PC microphone".into());
-                                        speaker = Some((rate, stop, Arc::new(Mutex::new(Default::default())))); // don't retry every 10 ms
-                                    }
-                                }
-                            }
-                            if let Some((_, _, q)) = &speaker {
-                                q.lock().unwrap().extend(pcm);
-                            }
-                        }
-                        _ => {}
+                        let _ = FRAMES.get().unwrap().send(Some(Arc::new(jpeg)));
                     }
-                }
-                if let Some((_, stop, _)) = speaker {
-                    stop.store(true, Ordering::SeqCst);
                 }
                 status::log(format!("camera stream: ended after {frames} frames"));
             }
@@ -645,4 +618,104 @@ async fn camera_stream() {
         let _ = FRAMES.get().unwrap().send(None);
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
+}
+
+// ---------------------------------------------------------------- PC microphone / speakers
+
+/// Provides "PC Microphone" and "PC Speakers" (vaudio.rs) and connects them to the PC while an
+/// app on the Mac uses them.
+fn audio_watch() {
+    // a process is a Core Audio object only once it has talked to the audio system
+    let mut me = vaudio::own_process_object();
+    if me == 0 {
+        let stop = Arc::new(AtomicBool::new(false));
+        let r = crate::audio::play(48000, stop.clone());
+        std::thread::sleep(Duration::from_millis(300));
+        stop.store(true, Ordering::SeqCst);
+        me = vaudio::own_process_object();
+        if me == 0 {
+            return status::log(format!("audio devices: no Core Audio process object ({:?})", r.err()));
+        }
+    }
+    let (devs, log) = vaudio::create(me);
+    status::log(format!("audio devices: {log:?}"));
+    let (wtx, _) = watch::channel((false, false));
+    let mut task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut last = (false, false);
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let want = (
+            devs.mic.is_some_and(|d| vaudio::used_by_others(d, true, me)),
+            devs.speaker.is_some_and(|d| vaudio::used_by_others(d, false, me)),
+        );
+        if want != last {
+            status::log(format!("audio: an app uses PC Microphone {}, PC Speakers {}", want.0, want.1));
+            status::update(|s| s.mic_detail = format!("PC Microphone {}, PC Speakers {}", if want.0 { "in use" } else { "ready" }, if want.1 { "in use" } else { "ready" }));
+            last = want;
+        }
+        let _ = wtx.send(want);
+        if want != (false, false) && task.as_ref().is_none_or(|t| t.is_finished()) && status::get().connected {
+            if PEER_VERSION.load(Ordering::SeqCst) < 6 {
+                continue; // the PC's MirrorMagic is too old for the audio channel
+            }
+            task = Some(RT.get().unwrap().spawn(audio_stream(wtx.subscribe())));
+        }
+    }
+}
+
+/// One audio connection to the PC while (mic, speakers) are wanted: plays the PC microphone into
+/// "PC Microphone" (through the muted tap on this process) and sends "PC Speakers" sound to the PC.
+async fn audio_stream(mut want: watch::Receiver<(bool, bool)>) {
+    let Ok((mut tx, rx, _, _)) = open(Channel::Audio).await.map_err(|e| status::log(format!("audio: {e}"))) else { return };
+    status::log("audio: connected");
+    let (reader, mut rx) = crate::audio::reader(rx);
+    let (ctx, mut crx) = mpsc::channel::<Msg>(64);
+    let mut capture: Option<Arc<AtomicBool>> = None;
+    let mut player = crate::audio::Player::default();
+    let mut sent = None;
+    let r: Result<(), secure::Error> = loop {
+        let w = *want.borrow_and_update();
+        if sent != Some(w) {
+            if w == (false, false) {
+                break Ok(());
+            }
+            if let Err(e) = tx.send(&Msg::AudioWant { mic: w.0, speaker: w.1 }).await {
+                break Err(e);
+            }
+            if w.1 && capture.is_none() {
+                let stop = Arc::new(AtomicBool::new(false));
+                let (s, ctx) = (stop.clone(), ctx.clone());
+                let r = tokio::task::spawn_blocking(move || {
+                    crate::audio::capture(Some(vaudio::SPEAKER_TAP_NAME), s, move |rate, pcm| drop(ctx.try_send(Msg::Audio { rate, pcm })))
+                })
+                .await;
+                status::log(format!("audio: PC Speakers capture: {r:?}"));
+                capture = Some(stop);
+            } else if !w.1 {
+                if let Some(s) = capture.take() {
+                    s.store(true, Ordering::SeqCst);
+                }
+            }
+            if !w.0 {
+                player.stop();
+            }
+            sent = Some(w);
+        }
+        tokio::select! {
+            _ = want.changed() => {}
+            m = crx.recv() => if let Some(m) = m { if let Err(e) = tx.send(&m).await { break Err(e) } },
+            m = rx.recv() => match m.unwrap_or(Err("closed".into())) {
+                Ok(Msg::Audio { rate, pcm }) => if let Some(r) = player.push(rate, pcm) {
+                    status::log(format!("audio: PC microphone at {rate} Hz into PC Microphone: {r:?}"));
+                },
+                Ok(_) => {}
+                Err(e) => break Err(e),
+            },
+        }
+    };
+    reader.abort();
+    if let Some(s) = capture {
+        s.store(true, Ordering::SeqCst);
+    }
+    status::log(format!("audio: ended {r:?}"));
 }

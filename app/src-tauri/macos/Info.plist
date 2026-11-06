@@ -4,6 +4,8 @@
 <dict>
   <key>NSLocalNetworkUsageDescription</key>
   <string>MirrorMagic connects to your PC on the local network to receive its keyboard, mouse and camera.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>MirrorMagic provides the "PC Microphone" and "PC Speakers" audio devices: it passes your PC's microphone to apps on the Mac and plays their sound on the PC.</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

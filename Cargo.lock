@@ -2684,7 +2684,7 @@ dependencies = [
 
 [[package]]
 name = "mirrormagic"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2696,7 +2696,9 @@ dependencies = [
  "log",
  "mm-core",
  "nokhwa",
+ "objc2",
  "objc2-app-kit",
+ "objc2-core-audio",
  "objc2-core-graphics",
  "objc2-foundation",
  "png 0.17.16",
@@ -2715,7 +2717,7 @@ dependencies = [
 
 [[package]]
 name = "mm-core"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "postcard",
  "rand 0.8.8",

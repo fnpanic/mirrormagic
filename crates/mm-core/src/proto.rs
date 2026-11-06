@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on incompatible changes; peers with a different version refuse the session.
-pub const PROTOCOL_VERSION: u32 = 5; // 3: clipboard files, 4: PcDisplay, 5: MacActive
+pub const PROTOCOL_VERSION: u32 = 6; // 3: clipboard files, 4: PcDisplay, 5: MacActive, 6: audio channel
 /// Oldest peer version still understood: newer versions only append messages, so the PC answers
 /// with the lower of both versions and never sends a peer messages it does not know.
 pub const MIN_COMPATIBLE_VERSION: u32 = 2;
@@ -16,6 +16,9 @@ pub enum Channel {
     Camera,
     /// Clipboard files, one connection per transfer (opened by the Mac, either direction).
     Files,
+    /// PC microphone ⇄ Mac, Mac call sound → PC speakers (protocol 6). Opened by the Mac while an
+    /// app uses "PC Microphone" or "PC Speakers".
+    Audio,
 }
 
 /// Where input goes while the Mac has control.
@@ -104,7 +107,8 @@ pub enum Msg {
     CameraState { on: bool, detail: String },
     /// Camera channel only: one JPEG frame.
     Frame { jpeg: Vec<u8> },
-    /// Camera channel only: 10 ms of the PC microphone, mono 16-bit at `rate` Hz.
+    /// Audio channel: 10 ms of mono 16-bit sound at `rate` Hz; PC → Mac: its microphone,
+    /// Mac → PC: what Mac apps play to "PC Speakers".
     Audio { rate: u32, pcm: Vec<i16> },
     Ping { t: u64 },
     Pong { t: u64 },
@@ -125,6 +129,8 @@ pub enum Msg {
     /// Control, Mac → PC: someone uses the Mac right now (input within the last 30 s). The PC
     /// keeps its screen awake, so the monitor does not fall back to the Mac's HDMI signal.
     MacActive,
+    /// Audio channel, Mac → PC: which of the PC's audio devices Mac apps use right now.
+    AudioWant { mic: bool, speaker: bool },
 }
 
 pub fn encode(msg: &Msg) -> Vec<u8> {

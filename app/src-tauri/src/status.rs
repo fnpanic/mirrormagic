@@ -19,7 +19,7 @@ pub struct Status {
     pub camera_on: bool,
     pub camera_detail: String,
     pub camera_wanted: bool,
-    /// Microphone path, e.g. "Mikrofon (HD Pro Webcam C920) · 48000 Hz" or "BlackHole 2ch".
+    /// Microphone path, e.g. "Mikrofon (HD Pro Webcam C920) · 48000 Hz" or (Mac) "PC Microphone in use, PC Speakers ready".
     pub mic_detail: String,
     pub can_inject: bool,
     pub displays: Vec<DisplayInfo>,
