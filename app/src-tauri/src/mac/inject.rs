@@ -3,7 +3,7 @@ use core_graphics::display::CGDisplay;
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton, EventField};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
-use mm_core::keymap::{KeyTranslator, MacFlags};
+use mm_core::keymap::{KeyTranslator, MacFlags, AUX, PLAIN};
 use mm_core::proto::Button;
 use std::time::{Duration, Instant};
 
@@ -130,6 +130,11 @@ impl Injector {
     }
 
     fn post_key(&mut self, code: u16, down: bool) {
+        if code & AUX != 0 {
+            return post_aux((code & 0xFF) as isize, down);
+        }
+        let plain = code & PLAIN != 0;
+        let code = code & 0xFF;
         if MacFlags::is_modifier(code) {
             self.flags.update(code, down);
         }
@@ -138,7 +143,7 @@ impl Injector {
             if MacFlags::is_modifier(code) {
                 e.set_type(CGEventType::FlagsChanged);
             }
-            e.set_flags(self.flags());
+            e.set_flags(if plain { CGEventFlags::empty() } else { self.flags() });
             e.post(CGEventTapLocation::HID);
         }
     }
@@ -155,12 +160,36 @@ impl Injector {
         }
     }
 
-    pub fn set_ctrl_is_cmd(&mut self, on: bool) {
-        self.keys.ctrl_is_cmd = on;
+    pub fn set_windows_shortcuts(&mut self, on: bool) {
+        self.keys.windows_shortcuts = on;
     }
 
     pub fn set_layout(&mut self, iso: bool, german: bool) {
         self.keys.iso = iso;
         self.keys.german = german;
+    }
+}
+
+/// Media and brightness keys are not key codes on macOS but NSSystemDefined events (subtype 8,
+/// "aux control buttons") carrying an NX_KEYTYPE, which is what a MacBook's top row sends.
+fn post_aux(nx_key: isize, down: bool) {
+    use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
+    use objc2_core_graphics::{CGEvent as Cg, CGEventTapLocation as Tap};
+    let state: isize = if down { 0xA } else { 0xB };
+    let Some(ev) = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+        NSEventType::SystemDefined,
+        objc2_foundation::NSPoint::new(0.0, 0.0),
+        NSEventModifierFlags((state as usize) << 8),
+        0.0,
+        0,
+        None,
+        8,
+        (nx_key << 16) | (state << 8),
+        -1,
+    ) else {
+        return;
+    };
+    if let Some(cg) = ev.CGEvent() {
+        Cg::post(Tap::HIDEventTap, Some(&*cg));
     }
 }

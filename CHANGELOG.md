@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.9 — 2026-11-06 (Mac)
+
+- **Keys keep the Mac keyboard's positions:** Ctrl = Control, Win = Option, Alt = Command. Before, Ctrl acted as Command, which left no Command key at Alt's position. The right Alt (AltGr) stays Option, with the German fix-ups for @ € { } [ ] \ | ~. The old behaviour is the "Windows shortcuts" setting (off by default). The former "Ctrl works as ⌘" setting is not carried over.
+- **F-keys work like a MacBook's top row:** F1/F2 brightness, F3 Mission Control, F4 Spotlight (⌘ Space), F7/F8/F9 back/play/forward, F10 mute, F11/F12 volume. F5 and F6 stay F5 and F6 (Apple's dictation and Do Not Disturb keys have no documented code). **Win+F-key** sends the real F1–F12 without modifiers, like fn on a Mac. The PC keyboard's own media keys (volume, play, next/previous) act as Mac media keys too. Media keys are posted as NSSystemDefined events like the MacBook sends them.
+
 ## 0.5.8 — 2026-11-06 (PC only)
 
 - Diagnostics for the 0.5.6 drift fix: when the PC's hidden cursor has slipped off its park point while you control the Mac, the log says `hidden cursor slipped by x,y px: corrected (would have pulled the Mac cursor)`, at most once a minute. Each such line is a pull that 0.5.5 and earlier would have shown on the Mac.

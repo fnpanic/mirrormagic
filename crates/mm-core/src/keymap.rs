@@ -185,8 +185,12 @@ pub struct KeyTranslator {
     pub iso: bool,
     pub german: bool,
     /// Windows habits on the Mac: Ctrl acts as Command (Ctrl+C copies) and the Win key as Control.
-    pub ctrl_is_cmd: bool,
+    /// Off (default): keys keep the Mac keyboard's positions, Ctrl = Control, Win = Option,
+    /// Alt = Command (AltGr stays Option, for the German @ € { } fix-ups).
+    pub windows_shortcuts: bool,
     altgr: bool,
+    /// Win held: F-keys send real F1–F12 (like fn on a Mac keyboard) instead of the top-row functions.
+    win: bool,
     /// What each held PC key was sent as, so the release matches the press.
     sent: HashMap<u16, Vec<u16>>,
 }
@@ -206,12 +210,42 @@ fn german_altgr(scan: u16) -> Option<(u16, bool)> {
     })
 }
 
-/// (mac key code, down)
+/// (mac key code, down). Codes with [`AUX`] set are media/brightness keys (an NSSystemDefined
+/// event with that NX key type); codes with [`PLAIN`] set are posted without modifier flags.
 pub type MacKey = (u16, bool);
+
+/// Marks an NX_KEYTYPE media key: volume, brightness, play.
+pub const AUX: u16 = 0x1000;
+/// Marks a key that must reach the Mac without modifiers (Win+F-key = plain F-key).
+pub const PLAIN: u16 = 0x2000;
+const MAC_MISSION_CONTROL: u16 = 0xA0;
+const MAC_COMMAND: u16 = 0x37;
+const MAC_SPACE: u16 = 0x31;
+
+/// The MacBook top row for F1–F12 (without fn), plus the PC keyboard's own media keys.
+fn top_row(scan: u16) -> Option<Vec<u16>> {
+    Some(match scan {
+        0x3B => vec![AUX | 3],                      // F1  brightness down
+        0x3C => vec![AUX | 2],                      // F2  brightness up
+        0x3D => vec![MAC_MISSION_CONTROL],          // F3  Mission Control
+        0x3E => vec![MAC_COMMAND, MAC_SPACE],       // F4  Spotlight
+        0x41 | 0xE010 => vec![AUX | 20],            // F7  previous / rewind
+        0x42 | 0xE022 => vec![AUX | 16],            // F8  play / pause
+        0x43 | 0xE019 => vec![AUX | 19],            // F9  next / fast-forward
+        0x44 | 0xE020 => vec![AUX | 7],             // F10 mute
+        0x57 | 0xE02E => vec![AUX | 1],             // F11 volume down
+        0x58 | 0xE030 => vec![AUX],                  // F12 volume up (NX type 0)
+        _ => return None,                           // F5, F6: real keys (no documented Mac code)
+    })
+}
+
+fn is_f_key(scan: u16) -> bool {
+    matches!(scan, 0x3B..=0x44 | 0x57 | 0x58)
+}
 
 impl KeyTranslator {
     pub fn new(iso: bool, german: bool) -> Self {
-        KeyTranslator { iso, german, ctrl_is_cmd: false, altgr: false, sent: HashMap::new() }
+        KeyTranslator { iso, german, windows_shortcuts: false, altgr: false, win: false, sent: HashMap::new() }
     }
 
     pub fn translate(&mut self, scan: u16, down: bool) -> Vec<MacKey> {
@@ -220,6 +254,9 @@ impl KeyTranslator {
         }
         if scan == SCAN_ALTGR {
             self.altgr = down;
+        }
+        if matches!(scan, 0xE05B | 0xE05C) {
+            self.win = down;
         }
         if !down {
             return match self.sent.remove(&scan) {
@@ -231,18 +268,26 @@ impl KeyTranslator {
             // autorepeat: repeat the main key only
             return vec![(*prev.last().unwrap(), true)];
         }
+        let media = if self.win && is_f_key(scan) { None } else { top_row(scan) };
         let codes = match (self.german && self.altgr).then(|| german_altgr(scan)).flatten() {
             Some((code, true)) => vec![MAC_SHIFT, code],
             Some((code, false)) => vec![code],
+            None if media.is_some() => media.unwrap(),
             None => match mac_from_scan(scan, self.iso) {
-                Some(c) if self.ctrl_is_cmd => vec![match c {
+                Some(c) if is_f_key(scan) && self.win => vec![PLAIN | c],
+                Some(c) if self.windows_shortcuts => vec![match c {
                     0x3B => 0x37, // left Ctrl -> left Command
                     0x3E => 0x36, // right Ctrl -> right Command
                     0x37 => 0x3B, // left Win (Command) -> left Control
                     0x36 => 0x3E, // right Win -> right Control
                     c => c,
                 }],
-                Some(c) => vec![c],
+                Some(c) => vec![match scan {
+                    0x38 => 0x37,   // left Alt -> left Command (Mac keyboard position)
+                    0xE05B => 0x3A, // left Win -> left Option
+                    0xE05C => 0x3D, // right Win -> right Option
+                    _ => c,
+                }],
                 None => return vec![],
             },
         };
@@ -334,6 +379,42 @@ mod tests {
     }
 
     #[test]
+    fn modifiers_keep_the_mac_keyboard_positions() {
+        let mut k = KeyTranslator::new(true, true);
+        assert_eq!(k.translate(0x1D, true), vec![(0x3B, true)]); // Ctrl -> Control
+        assert_eq!(k.translate(0xE05B, true), vec![(0x3A, true)]); // Win -> Option
+        assert_eq!(k.translate(0x38, true), vec![(0x37, true)]); // Alt -> Command
+        assert_eq!(k.translate(0xE01D, true), vec![(0x3E, true)]); // right Ctrl -> right Control
+        assert_eq!(k.translate(0xE05C, true), vec![(0x3D, true)]); // right Win -> right Option
+        assert_eq!(k.translate(0x38, false), vec![(0x37, false)]); // the release matches
+        // AltGr keeps the German characters: AltGr+Q = @ = Option+L
+        let mut k = KeyTranslator::new(true, true);
+        k.translate(SCAN_FAKE_CTRL, true);
+        assert_eq!(k.translate(SCAN_ALTGR, true), vec![(0x3D, true)]);
+        assert_eq!(k.translate(0x10, true), vec![(0x25, true)]);
+    }
+
+    #[test]
+    fn f_keys_are_the_macbook_top_row_and_win_makes_them_real() {
+        let mut k = KeyTranslator::new(true, true);
+        assert_eq!(k.translate(0x3B, true), vec![(AUX | 3, true)]); // F1 brightness down
+        assert_eq!(k.translate(0x3B, true), vec![(AUX | 3, true)]); // held: repeats
+        assert_eq!(k.translate(0x3B, false), vec![(AUX | 3, false)]);
+        assert_eq!(k.translate(0x3D, true), vec![(0xA0, true)]); // F3 Mission Control
+        assert_eq!(k.translate(0x3E, true), vec![(0x37, true), (0x31, true)]); // F4 Spotlight = Cmd+Space
+        assert_eq!(k.translate(0x3E, false), vec![(0x31, false), (0x37, false)]);
+        assert_eq!(k.translate(0x58, true), vec![(AUX, true)]); // F12 volume up (NX type 0)
+        assert_eq!(k.translate(0x3F, true), vec![(0x60, true)]); // F5 stays F5
+        assert_eq!(k.translate(0xE030, true), vec![(AUX, true)]); // the PC's own volume-up key too
+        // Win held: real F-keys, posted without the Option flag
+        k.translate(0xE05B, true);
+        assert_eq!(k.translate(0x3B, true), vec![(PLAIN | 0x7A, true)]); // F1
+        assert_eq!(k.translate(0x3B, false), vec![(PLAIN | 0x7A, false)]);
+        k.translate(0xE05B, false);
+        assert_eq!(k.translate(0x3B, true), vec![(AUX | 3, true)]);
+    }
+
+    #[test]
     fn german_altgr_becomes_option_combo() {
         let mut k = KeyTranslator::new(true, true);
         assert_eq!(k.translate(SCAN_FAKE_CTRL, true), vec![]);
@@ -371,7 +452,7 @@ mod ctrl_cmd_tests {
     #[test]
     fn ctrl_c_becomes_command_c_when_swapped() {
         let mut k = KeyTranslator::new(true, true);
-        k.ctrl_is_cmd = true;
+        k.windows_shortcuts = true;
         assert_eq!(k.translate(0x1D, true), vec![(0x37, true)]); // Ctrl -> Command
         assert_eq!(k.translate(0x2E, true), vec![(0x08, true)]); // C
         assert_eq!(k.translate(0x2E, false), vec![(0x08, false)]);

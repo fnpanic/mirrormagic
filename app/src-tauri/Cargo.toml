@@ -38,6 +38,10 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
+# media / brightness keys (NSSystemDefined events); already in the tree via tauri
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSGraphicsContext", "objc2-core-graphics"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent", "CGEventTypes"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

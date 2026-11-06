@@ -317,8 +317,8 @@ function MacView(p: ViewProps) {
         <Row label="Natural scrolling" hint="Reverse the PC mouse wheel">
           <Toggle label="Natural scrolling" on={c.invert_scroll} onChange={(v) => save({ invert_scroll: v })} />
         </Row>
-        <Row label="Ctrl works as ⌘" hint="Ctrl+C, Ctrl+V … like on Windows; the Win key becomes Control">
-          <Toggle label="Ctrl works as Command" on={c.ctrl_is_cmd} onChange={(v) => save({ ctrl_is_cmd: v })} />
+        <Row label="Windows shortcuts" hint={c.windows_shortcuts ? "Ctrl works as ⌘ (Ctrl+C, Ctrl+V …); the Win key becomes Control" : "Mac layout: Ctrl = Control, Win = Option, Alt = ⌘. F-keys = Mac top row, Win+F-key = real F-key"}>
+          <Toggle label="Windows shortcuts" on={c.windows_shortcuts} onChange={(v) => save({ windows_shortcuts: v })} />
         </Row>
         <Row label="German AltGr keys" hint="AltGr+Q types @, AltGr+8 types [ … like on the PC">
           <select className={field} value={c.german_fixups === null ? "auto" : c.german_fixups ? "on" : "off"}

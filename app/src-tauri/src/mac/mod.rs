@@ -61,7 +61,7 @@ fn refresh() -> Msg {
         let mut i = inj();
         i.set_layout(sys::keyboard_is_iso(), german(&c));
         i.invert_scroll = c.invert_scroll;
-        i.set_ctrl_is_cmd(c.ctrl_is_cmd);
+        i.set_windows_shortcuts(c.windows_shortcuts);
     }
     let can = sys::can_inject(false);
     status::update(|s| {
