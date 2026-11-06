@@ -347,7 +347,8 @@ fn hdmi_restore() {
     let known = config::get().hdmi_off;
     let ids: Vec<u32> = known.map_or_else(|| (1..=32).collect(), |id| vec![id]).into_iter().filter(|i| !online.contains(i)).collect();
     if ids.is_empty() || (known.is_none() && sys::external_display().is_some()) {
-        return config::update(|c| c.hdmi_off = None); // nothing was left off
+        config::update(|c| c.hdmi_off = None); // nothing was left off
+        return;
     }
     let r = sys::set_display_enabled(&ids, true);
     for _ in 0..30 {
