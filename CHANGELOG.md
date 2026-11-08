@@ -7,6 +7,11 @@
   - If mirroring fails, MirrorMagic logs every display's state (`displays (id, built-in, mirrors, active)`). It then retries for up to 4 s, each time undoing any mirror set in its own step first. When the roles swap, the monitor stops mirroring the laptop screen in the same step.
   - The error says which step failed (`configure error …` or `complete error …`).
 - In the working runs of 2026-11-06, mirroring was called in the same second the output came back and succeeded. That makes the failure a race with macOS attaching the display.
+- Verified on the real machines (0.5.19, the user pressing Ctrl+Alt+M):
+  - Switch to the Mac: the PC registered the hotkey at 12:22:10. On the Mac, HDMI came on at 12:22:13 and mirroring succeeded on the first try. `enter Monitor` at 12:22:15 found the monitor at 2560×1440.
+  - The user worked on the Mac for 4 minutes (the PC logged `Mac in use`). The Mac's HDMI output stayed on the whole time.
+  - Switch back: hotkey at 12:26:19, `mirror false` at 12:26:22, and HDMI off at 12:26:29, 7 s later, after the DDC switch back. On the way back, the Mac handed 165 characters of copied text to the PC.
+  - The retry path didn't run, because the attach race didn't occur this time. If it does, its log line shows the display states.
 
 ## 0.5.18 — 2026-11-06 (Mac)
 
