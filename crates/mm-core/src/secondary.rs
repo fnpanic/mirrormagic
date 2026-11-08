@@ -33,6 +33,8 @@ pub fn mac_active_due(idle_s: f64, since_report_s: f64) -> bool {
 
 /// A real cursor position this far (points) from the tracked one means the Mac's own trackpad moved it.
 const OS_MOVED: f64 = 3.0;
+/// Positions posted most recently: macOS may report any of them while it catches up.
+const RECENT: usize = 32;
 /// How far inside the shared edge the Mac's cursor waits after handing control back.
 const PARK_INSET: f64 = 48.0;
 
@@ -42,6 +44,29 @@ struct Active {
     side: Side,
     area: Rect,
     pos: (f64, f64),
+    /// Ring of the last positions posted (`pos` included), newest at `next - 1`.
+    recent: [(f64, f64); RECENT],
+    next: usize,
+}
+
+impl Active {
+    fn new(mode: Mode, side: Side, area: Rect, pos: (f64, f64)) -> Self {
+        Active { mode, side, area, pos, recent: [pos; RECENT], next: 0 }
+    }
+
+    fn set_pos(&mut self, pos: (f64, f64)) {
+        self.pos = pos;
+        self.recent[self.next] = pos;
+        self.next = (self.next + 1) % RECENT;
+    }
+
+    /// The real position is none we posted lately: something else (the Mac's trackpad) moved
+    /// the cursor. A read-back that is rounded or several events late must not move it (drift,
+    /// or jumping back and forth during fast moves).
+    fn moved_locally(&self, p: (f64, f64)) -> bool {
+        let near = |q: &(f64, f64)| (p.0 - q.0).abs() <= OS_MOVED && (p.1 - q.1).abs() <= OS_MOVED;
+        !near(&self.pos) && !self.recent.iter().any(near)
+    }
 }
 
 pub struct Secondary {
@@ -83,7 +108,8 @@ impl Secondary {
             return;
         }
         a.area = area;
-        a.pos = os_pos.filter(|p| area.contains(p.0, p.1)).unwrap_or((a.pos.0.clamp(area.x, area.x + area.w - 1.0), a.pos.1.clamp(area.y, area.y + area.h - 1.0)));
+        let pos = os_pos.filter(|p| area.contains(p.0, p.1)).unwrap_or((a.pos.0.clamp(area.x, area.x + area.w - 1.0), a.pos.1.clamp(area.y, area.y + area.h - 1.0)));
+        *a = Active::new(a.mode, a.side, area, pos);
     }
 
     /// Returns the absolute point to warp the cursor to.
@@ -99,7 +125,7 @@ impl Secondary {
                 Side::Bottom => (area.x + a * (area.w - 1.0), area.y + area.h - 2.0),
             },
         };
-        self.active = Some(Active { mode, side, area, pos });
+        self.active = Some(Active::new(mode, side, area, pos));
         pos
     }
 
@@ -111,10 +137,7 @@ impl Secondary {
     pub fn motion(&mut self, dx: i32, dy: i32, os_pos: Option<(f64, f64)>) -> Option<Effect> {
         let a = self.active.as_mut()?;
         let (dx, dy) = (dx as f64 * self.speed, dy as f64 * self.speed);
-        // The real position wins only if something else (the Mac's trackpad) clearly moved the
-        // cursor: a read-back that is rounded or not yet updated must not nudge it (drift).
-        let moved_locally = |p: &(f64, f64)| (p.0 - a.pos.0).abs() > OS_MOVED || (p.1 - a.pos.1).abs() > OS_MOVED;
-        let base = os_pos.filter(|p| a.area.contains(p.0, p.1) && moved_locally(p)).unwrap_or(a.pos);
+        let base = os_pos.filter(|p| a.area.contains(p.0, p.1) && a.moved_locally(*p)).unwrap_or(a.pos);
         let (nx, ny) = (base.0 + dx, base.1 + dy);
         let r = a.area;
         if a.mode == Mode::Edge {
@@ -139,7 +162,7 @@ impl Secondary {
         }
         let x = nx.clamp(r.x, r.x + r.w - 1.0);
         let y = ny.clamp(r.y, r.y + r.h - 1.0);
-        a.pos = (x, y);
+        a.set_pos((x, y));
         Some(Effect::MoveTo { x, y, dx, dy })
     }
 }
@@ -204,6 +227,24 @@ mod tests {
         m.exit();
         m.set_displays(Displays { edge: Rect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 }, monitor: None }, None);
         assert_eq!(m.enter(Mode::Monitor, Side::Right, 0.0), (50.0, 50.0));
+    }
+
+    #[test]
+    fn fast_moves_with_a_read_back_several_events_late_do_not_jiggle() {
+        // monitor mode, 2026-11-08 23:43–00:00: the cursor jiggled and was barely usable. macOS
+        // (busy mirroring) reports the position several events late; during fast moves that is
+        // far more than OS_MOVED away and was taken for a trackpad move: the cursor jumped back.
+        let mut m = mac();
+        let start = m.enter(Mode::Monitor, Side::Right, 0.5);
+        let mut posted = vec![start];
+        for _ in 0..50 {
+            let late = posted[posted.len().saturating_sub(4)]; // 3 events behind
+            let Some(Effect::MoveTo { x, y, .. }) = m.motion(20, -5, Some(late)) else { panic!() };
+            posted.push((x, y));
+        }
+        assert_eq!(*posted.last().unwrap(), (start.0 + 1000.0, start.1 - 250.0));
+        // a real trackpad move is still followed
+        assert_eq!(m.motion(0, 1, Some((2000.0, 600.0))), Some(Effect::MoveTo { x: 2000.0, y: 601.0, dx: 0.0, dy: 1.0 }));
     }
 
     #[test]
