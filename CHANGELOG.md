@@ -7,6 +7,7 @@
   - The PC first takes keyboard, mouse and monitor back, then drops the session within 2 s and refuses new connections. Its input hooks are removed, so there is no crossing and no hotkey.
   - The Mac stops dialing the PC and turns its HDMI output on, as it would be without MirrorMagic.
   - Window and tray show "Paused". Unchecking resumes.
+- Verified on the real machines (0.5.20): a screenshot copied on the Mac arrived at 22:24:47 (`received +image`, `written`), and the file `cgm-guardrail-v2-2d786ba.zip` copied in Finder was ready at 22:25:15. The user confirmed that both pasted on Windows. Pause has not been tried on the real machines yet.
 
 ## 0.5.19 — 2026-11-08 (Mac)
 
