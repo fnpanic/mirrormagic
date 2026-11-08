@@ -49,6 +49,10 @@ pub fn set_paused(on: bool) {
     if on {
         crate::pc::release(); // input and monitor back to the PC while the Mac still listens
     }
+    #[cfg(target_os = "macos")]
+    if on {
+        crate::mac::monitor_back_for_pause();
+    }
     config::update(|c| c.paused = on);
     status::log(if on { "paused" } else { "resumed" });
     #[cfg(target_os = "macos")]

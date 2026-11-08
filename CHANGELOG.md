@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.21 — 2026-11-08 (Mac)
+
+- **Pause on the Mac in monitor mode switches the monitor back to the PC.** Only the Mac can do that switch, because the monitor takes DDC only on its active input. Before, a Mac pause left the monitor on the Mac's input. The Mac now remembers the PC input from each `Ddc` switch-back (`config.pc_input`, default DisplayPort 1 = 0x0F) and sends it before the session ends. Mac log: `paused in monitor mode: monitor to the PC input …`.
+
 ## 0.5.20 — 2026-11-08 (PC and Mac)
 
 - **Files copied on the Mac now paste on Windows.** The transfer itself worked: on 2026-11-08 at 22:03 and 22:04 the Mac pushed `logile_tether.txt` and `tether_input.txt`, and both arrived complete in `%TEMP%\MirrorMagiciles\<id>`. But arboard's Windows `file_list` writes CF_HDROP without emptying the clipboard first, so the text copied earlier stayed next to the files. Any app that prefers text (a chat box, an editor, the Explorer address bar) pasted that old text instead of the file. The PC now clears the clipboard before writing the file list. Ignored test `files_replace_text` (touches the real clipboard): passed. Before the fix, a probe left `UnicodeText` next to `FileDrop`; an Explorer paste of the file (Shell `Paste` verb) worked. On the Mac, arboard already clears the pasteboard. Pictures: PNG hand-overs worked both ways all along (both logs, `written`), and a copied picture file travels as a file.

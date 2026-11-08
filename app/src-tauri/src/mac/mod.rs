@@ -321,6 +321,15 @@ static MONITOR_LEFT_MS: AtomicU64 = AtomicU64::new(0);
 /// switched it off 2 s after a failed mirror: black monitor).
 static MONITOR_ON: AtomicBool = AtomicBool::new(false);
 
+/// Pause while the monitor shows the Mac: only this side can switch it back (DDC works on the
+/// active input), and the session ends right after.
+pub fn monitor_back_for_pause() {
+    if MONITOR_ON.load(Ordering::SeqCst) {
+        let v = config::get().pc_input;
+        status::log(format!("paused in monitor mode: monitor to the PC input {v:#04x}: {:?}", ddc::set_input(v)));
+    }
+}
+
 fn monitor_mode(on: bool) {
     if MONITOR_ON.swap(on, Ordering::SeqCst) && !on {
         MONITOR_LEFT_MS.store(now_ms(), Ordering::SeqCst); // the DDC switch back still needs HDMI
@@ -519,6 +528,9 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
         }
         Msg::ReleaseAll => inj().release_all(),
         Msg::Ddc { value } => {
+            if config::get().pc_input != value {
+                config::update(|c| c.pc_input = value); // learned: a pause in monitor mode switches back itself
+            }
             let utx = utx.clone();
             std::thread::spawn(move || {
                 let r = ddc::set_input(value);
