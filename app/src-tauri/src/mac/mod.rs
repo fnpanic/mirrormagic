@@ -171,12 +171,16 @@ async fn open(channel: Channel) -> Result<(secure::Sender, secure::Receiver, Str
 async fn client_loop() {
     let mut lost = Instant::now();
     loop {
-        if lost.elapsed().as_secs() >= HDMI_BACK_S {
-            hdmi_on("no PC for 5 min");
-        }
         if config::paused() {
+            // HDMI stays off while paused (5 s after monitor mode, like connected), or the
+            // monitor's automatic input detection shows the Mac; Quit turns it on
+            hdmi_off();
+            lost = Instant::now();
             tokio::time::sleep(Duration::from_secs(1)).await;
             continue;
+        }
+        if lost.elapsed().as_secs() >= HDMI_BACK_S {
+            hdmi_on("no PC for 5 min");
         }
         match open(Channel::Control).await {
             Ok((tx, rx, name, host)) => {
@@ -322,9 +326,14 @@ static MONITOR_LEFT_MS: AtomicU64 = AtomicU64::new(0);
 static MONITOR_ON: AtomicBool = AtomicBool::new(false);
 
 /// Pause while the monitor shows the Mac: only this side can switch it back (DDC works on the
-/// active input), and the session ends right after.
+/// active input), and the session ends right after. Like the normal switch back, but unmirror
+/// first and let the HDMI signal settle: the change re-syncs HDMI and the monitor's automatic
+/// input detection jumped back to it (2026-11-08 22:50). HDMI then goes off (`client_loop`).
 pub fn monitor_back_for_pause() {
     if MONITOR_ON.load(Ordering::SeqCst) {
+        monitor_mode(false);
+        mirror(false);
+        std::thread::sleep(Duration::from_secs(1));
         let v = config::get().pc_input;
         status::log(format!("paused in monitor mode: monitor to the PC input {v:#04x}: {:?}", ddc::set_input(v)));
     }
@@ -395,7 +404,7 @@ pub fn shutdown() {
 }
 
 /// Monitor mode (or no PC for a while): turn the HDMI output on and wait until it is online.
-pub fn hdmi_on(why: &str) {
+fn hdmi_on(why: &str) {
     let Some(id) = HDMI_OFF.lock().unwrap().take() else { return };
     let r = sys::set_display_enabled(id, true);
     config::update(|c| c.hdmi_off = None);

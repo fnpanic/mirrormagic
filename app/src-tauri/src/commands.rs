@@ -47,7 +47,7 @@ pub fn save_config(patch: Value) -> Result<(), String> {
 pub fn set_paused(on: bool) {
     #[cfg(windows)]
     if on {
-        crate::pc::release(); // input and monitor back to the PC while the Mac still listens
+        crate::pc::release_for_pause(); // input and monitor back to the PC while the Mac still listens
     }
     #[cfg(target_os = "macos")]
     if on {
@@ -55,10 +55,6 @@ pub fn set_paused(on: bool) {
     }
     config::update(|c| c.paused = on);
     status::log(if on { "paused" } else { "resumed" });
-    #[cfg(target_os = "macos")]
-    if on {
-        crate::mac::hdmi_on("paused"); // the monitor may show the Mac again, as without MirrorMagic
-    }
     status::update(|s| s.paused = on);
 }
 

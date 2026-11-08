@@ -148,6 +148,29 @@ pub fn release() {
     run(out);
 }
 
+/// Pause: monitor back to the PC first (the Mac still listens and switches it), then input.
+pub fn release_for_pause() {
+    if primary().monitor_on_mac {
+        toggle_monitor(); // also releases
+    } else {
+        release();
+    }
+}
+
+/// The session ended while monitor mode was on. Usually the monitor still shows the Mac (Wi-Fi
+/// drop: the reconnect re-enters monitor mode), but a Mac pause switches it to the PC itself:
+/// then the flag must go, or the next connection jumps back into monitor mode.
+fn recheck_monitor_after_drop() {
+    std::thread::sleep(Duration::from_secs(3)); // DisplayPort link up, DDC answers on the active input
+    let pc = config::get().pc_input;
+    let on_mac = primary().monitor_on_mac; // not across the DDC read: the input hook locks it too
+    if on_mac && ddc::current() == Some(pc) {
+        primary().monitor_on_mac = false;
+        status::log("session ended in monitor mode, but the monitor shows the PC: monitor mode off");
+        status::update(|s| s.monitor_on_mac = false);
+    }
+}
+
 /// Protocol version agreed with the connected Mac.
 static PEER_VERSION: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(PROTOCOL_VERSION);
 
@@ -485,6 +508,9 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
         *CTRL_TX.lock().unwrap() = None;
         let out = primary().disconnected();
         run(out);
+        if primary().monitor_on_mac {
+            std::thread::spawn(recheck_monitor_after_drop);
+        }
         camera_wanted(false);
         status::update(|s| {
             s.connected = false;
