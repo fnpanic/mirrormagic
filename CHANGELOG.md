@@ -4,6 +4,7 @@
 
 - **Monitor mode: the cursor no longer jiggles.** On 2026-11-08, from 23:43 to 00:00, the cursor in monitor mode suddenly jiggled and was barely usable. For every PC motion, the Mac reads the real cursor position. If it was more than 3 points from the tracked one, the Mac took it for a move by its own trackpad and continued from there. While mirroring at 2560×1440, macOS can report the position several events late. During fast moves (around 20 px per event) that lag is far more than 3 points, so the cursor kept jumping back to where it had just been. The Mac now remembers the last 32 positions it posted, and a read-back near any of them counts as lag, not as a trackpad move. New test `fast_moves_with_a_read_back_several_events_late_do_not_jiggle`: 50 moves of (20, −5) with the read-back 3 events late. Before the fix the cursor travelled 260 px instead of 1000; now all 1000 px arrive, and a real trackpad move is still followed.
 - Neither log has a line for this (the read-back decision was not logged), so the cause comes from the code path and the test, not from a log.
+- Verified on the real machines: the Mac build finished at 00:06:39. Monitor mode ran from 00:09:38 to 00:10:41 (PC hotkey lines), with fast moves, slow moves and clicks, and the user confirmed the cursor was smooth. The PC was updated to 0.5.25 at 00:12:40 (no Windows code change).
 
 ## 0.5.24 — 2026-11-08 (Mac)
 
