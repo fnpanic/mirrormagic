@@ -3,6 +3,8 @@
 ## 0.5.21 — 2026-11-08 (Mac)
 
 - **Pause on the Mac in monitor mode switches the monitor back to the PC.** Only the Mac can do that switch, because the monitor takes DDC only on its active input. Before, a Mac pause left the monitor on the Mac's input. The Mac now remembers the PC input from each `Ddc` switch-back (`config.pc_input`, default DisplayPort 1 = 0x0F) and sends it before the session ends. Mac log: `paused in monitor mode: monitor to the PC input …`.
+- Verified (the user clicking): Quit on the PC (restarted hidden 22:39:35, the Mac reconnected 22:39:37), and Quit in the Mac window at 22:40:00 (`HDMI output on (MirrorMagic quits): Ok`). The Mac's menu-bar icon was not visible, probably hidden behind the notch (macOS hides menu-bar icons that don't fit). Opening MirrorMagic from Applications brings up its window with Pause and Quit. The Mac pause in monitor mode has not been tried yet.
+- Mac build script: the signing step now adds and removes only its own temporary keychain in the user search list. Before, it restored the whole list it had read at the start, which dropped the keychain of a Tether build running at the same time (Tether build failed at 22:34: "could not be found in the keychain").
 
 ## 0.5.20 — 2026-11-08 (PC and Mac)
 

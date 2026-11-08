@@ -15,9 +15,10 @@ rm -rf "$B/src" && mkdir -p "$B/src" "$B/out" && tar -xzf "$B/src.tgz" -C "$B/sr
 
 kc="$B/sign/tmp.keychain-db"
 kp=$(openssl rand -hex 16)
-orig=$(security list-keychains -d user | tr -d '"' | xargs)
+# the search list is shared with other build scripts (Tether's): add and remove only our entry
+kc_list() { security list-keychains -d user | tr -d '"' | xargs; }
 cleanup() {
-  security list-keychains -d user -s $orig
+  security list-keychains -d user -s $(kc_list | xargs -n1 | grep -vxF "$kc" | xargs)
   security delete-keychain "$kc" 2>/dev/null
   rm -P -f "$B/sign/cs.p12" "$B/sign/p12.pass" 2>/dev/null
 }
@@ -28,7 +29,7 @@ security create-keychain -p "$kp" "$kc" &&
   security import "$B/sign/cs.p12" -k "$kc" -P "$(cat "$B/sign/p12.pass")" -T /usr/bin/codesign >/dev/null &&
   security set-key-partition-list -S apple-tool:,apple: -s -k "$kp" "$kc" >/dev/null || fail "keychain import"
 rm -P -f "$B/sign/cs.p12" "$B/sign/p12.pass"
-security list-keychains -d user -s "$kc" $orig
+security list-keychains -d user -s "$kc" $(kc_list)
 log "certificate imported"
 
 cd "$B/src"
