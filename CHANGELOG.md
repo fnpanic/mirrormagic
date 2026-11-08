@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.24 — 2026-11-08 (Mac)
+
+- **Pause in monitor mode: HDMI goes off right after the switch.** Test with 0.5.23 at 23:09 (Mac clock): unmirror 23:09:38, switch to DisplayPort `Ok` 23:09:39, HDMI off 23:09:43, and the PC read DisplayPort at 23:09:42 (PC clock). The user saw the PC briefly, then the Mac for a few seconds, then the PC. While the HDMI signal was still there, the monitor's automatic input detection jumped back to it. The 5 s HDMI grace after monitor mode is for the DDC switch, which runs over HDMI. A pause has already sent that switch, so the Mac now turns HDMI off right after the switch succeeds. The 1 s wait after unmirroring is gone. The resume part of 0.5.22/0.5.23 worked: the PC logged `session ended in monitor mode, but the monitor shows the PC: monitor mode off`, and the Mac did not re-enter monitor mode on resume.
+
 ## 0.5.23 — 2026-11-08 (Mac)
 
 - **Pause in monitor mode: the monitor stays on the PC.** In the user's second test (22:50:09, Mac clock) the Mac switched the monitor to DisplayPort (`Ok`), and the PC read DisplayPort 3 s later. Yet the monitor showed the Mac again: the HDMI output stayed on, and the unmirror a moment later re-synced the HDMI signal, which the monitor's automatic input detection picked up. A Mac pause in monitor mode now does what the normal switch-back does:

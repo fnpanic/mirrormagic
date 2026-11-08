@@ -326,16 +326,19 @@ static MONITOR_LEFT_MS: AtomicU64 = AtomicU64::new(0);
 static MONITOR_ON: AtomicBool = AtomicBool::new(false);
 
 /// Pause while the monitor shows the Mac: only this side can switch it back (DDC works on the
-/// active input), and the session ends right after. Like the normal switch back, but unmirror
-/// first and let the HDMI signal settle: the change re-syncs HDMI and the monitor's automatic
-/// input detection jumped back to it (2026-11-08 22:50). HDMI then goes off (`client_loop`).
+/// active input), and the session ends right after. HDMI goes off right after the switch, not
+/// 5 s later: while its signal was still there, the monitor's automatic input detection jumped
+/// back to it for a few seconds (2026-11-08 22:50 and 23:09).
 pub fn monitor_back_for_pause() {
     if MONITOR_ON.load(Ordering::SeqCst) {
         monitor_mode(false);
         mirror(false);
-        std::thread::sleep(Duration::from_secs(1));
         let v = config::get().pc_input;
-        status::log(format!("paused in monitor mode: monitor to the PC input {v:#04x}: {:?}", ddc::set_input(v)));
+        let r = ddc::set_input(v);
+        status::log(format!("paused in monitor mode: monitor to the PC input {v:#04x}: {r:?}"));
+        if r.is_ok() {
+            hdmi_off_now(); // the DDC switch no longer needs the link
+        }
     }
 }
 
@@ -356,10 +359,14 @@ fn now_ms() -> u64 {
 /// asleep, user wakes the Mac first). Re-checked every 2 s, because waking the monitor or
 /// re-plugging HDMI brings the display back.
 fn hdmi_off() {
-    static LAST_ERR: Mutex<String> = Mutex::new(String::new());
     if MONITOR_ON.load(Ordering::SeqCst) || config::get().mirrored || now_ms().saturating_sub(MONITOR_LEFT_MS.load(Ordering::SeqCst)) < 5000 {
         return;
     }
+    hdmi_off_now();
+}
+
+fn hdmi_off_now() {
+    static LAST_ERR: Mutex<String> = Mutex::new(String::new());
     let Some(id) = sys::external_display() else { return };
     let r = sys::set_display_enabled(id, false);
     match &r {
