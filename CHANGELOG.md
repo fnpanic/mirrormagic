@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.19 — 2026-11-08 (Mac)
+
+- **Ctrl+Alt+M: no more black monitor.** On 2026-11-08 at 11:49:50 the Mac turned its HDMI output on for monitor mode, but mirroring failed at once (`mirror true failed: mirror: 1001`). The freshly enabled monitor was still attaching and was missing from the active display list, so macOS refused the layout. The 2 s HDMI check treated "not mirrored" as "not in monitor mode" and switched the output off again at 11:49:52, so the monitor, already on HDMI, stayed black. Now:
+  - The HDMI output stays on for the whole monitor mode (from `Enter Monitor` until monitor mode ends), whether mirroring worked or not.
+  - If mirroring fails, MirrorMagic logs every display's state (`displays (id, built-in, mirrors, active)`). It then retries for up to 4 s, each time undoing any mirror set in its own step first. When the roles swap, the monitor stops mirroring the laptop screen in the same step.
+  - The error says which step failed (`configure error …` or `complete error …`).
+- In the working runs of 2026-11-06, mirroring was called in the same second the output came back and succeeded. That makes the failure a race with macOS attaching the display.
+
 ## 0.5.18 — 2026-11-06 (Mac)
 
 - **Camera off right after the call.** The 0.5.17 test call showed the end-of-call signal. OBS's camera extension logs `Stream Source … removing streaming client` when an app stops reading the virtual camera (20:06:54, the moment the call ended). MirrorMagic now checks immediately on that line and turns the PC camera off. In 0.5.17 the camera stayed on: the redacted control events made MirrorMagic believe the log worked, which stretched the safety probe to 10 minutes.

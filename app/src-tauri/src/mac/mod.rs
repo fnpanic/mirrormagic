@@ -259,6 +259,7 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
     *CTRL_TX.lock().unwrap() = None;
     sec().exit();
     inj().release_all();
+    monitor_mode(false);
     mirror(false);
     PC_DISPLAY_OFF.store(false, Ordering::SeqCst);
     r
@@ -309,6 +310,15 @@ fn sleep_displays_when_idle() {
 static HDMI_OFF: Mutex<Option<u32>> = Mutex::new(None);
 /// When monitor mode last ended (ms since T0): the switch back over DDC needs the HDMI link.
 static MONITOR_LEFT_MS: AtomicU64 = AtomicU64::new(0);
+/// The PC has the monitor on the Mac's input: HDMI stays on, even if mirroring failed (0.5.18
+/// switched it off 2 s after a failed mirror: black monitor).
+static MONITOR_ON: AtomicBool = AtomicBool::new(false);
+
+fn monitor_mode(on: bool) {
+    if MONITOR_ON.swap(on, Ordering::SeqCst) && !on {
+        MONITOR_LEFT_MS.store(now_ms(), Ordering::SeqCst); // the DDC switch back still needs HDMI
+    }
+}
 /// Turn the HDMI output back on after this long without the PC (PC shut down: monitor for the Mac).
 const HDMI_BACK_S: u64 = 300;
 
@@ -322,7 +332,7 @@ fn now_ms() -> u64 {
 /// re-plugging HDMI brings the display back.
 fn hdmi_off() {
     static LAST_ERR: Mutex<String> = Mutex::new(String::new());
-    if config::get().mirrored || now_ms().saturating_sub(MONITOR_LEFT_MS.load(Ordering::SeqCst)) < 5000 {
+    if MONITOR_ON.load(Ordering::SeqCst) || config::get().mirrored || now_ms().saturating_sub(MONITOR_LEFT_MS.load(Ordering::SeqCst)) < 5000 {
         return;
     }
     let Some(id) = sys::external_display() else { return };
@@ -388,10 +398,20 @@ fn mirror(on: bool) {
         return;
     }
     status::log(format!("mirror {on}"));
-    if !on {
-        MONITOR_LEFT_MS.store(now_ms(), Ordering::SeqCst); // the DDC switch back still needs HDMI
+    let mut r = sys::set_mirror(on);
+    if let (true, Err(e)) = (on, r.clone()) {
+        // right after its HDMI output comes back, macOS is still attaching the monitor (for a
+        // moment it mirrors the laptop screen) and refuses the layout (error 1001, 2026-11-08)
+        status::log(format!("mirror true: {e}, displays (id, built-in, mirrors, active) {:?}: retrying", sys::display_states()));
+        let t = Instant::now();
+        while r.is_err() && t.elapsed() < Duration::from_secs(4) {
+            std::thread::sleep(Duration::from_millis(250));
+            let _ = sys::set_mirror(false); // break a mirror set macOS made, in its own step
+            r = sys::set_mirror(true);
+        }
+        status::log(format!("mirror true after {} ms of retries: {r:?}", t.elapsed().as_millis()));
     }
-    match sys::set_mirror(on) {
+    match r {
         Ok(()) => {
             config::update(|c| c.mirrored = on);
             // macOS applies the new layout asynchronously; wait (max 2 s) so the cursor area is right
@@ -444,6 +464,7 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
     }
     match m {
         Msg::Enter { mode, side, along } => {
+            monitor_mode(mode == Mode::Monitor);
             if mode == Mode::Monitor {
                 hdmi_on("monitor mode");
             }
@@ -485,6 +506,7 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
             }
             sec().exit();
             inj().release_all();
+            monitor_mode(false);
             mirror(false);
             set_control("local");
         }

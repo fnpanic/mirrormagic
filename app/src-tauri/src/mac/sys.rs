@@ -64,16 +64,22 @@ pub fn set_mirror(on: bool) -> Result<(), String> {
             let _ = builtin.cancel_configuration(&cfg);
             return Err("no external display connected".into());
         };
-        builtin.configure_display_mirror_of_display(&cfg, ext)
+        // a display that just came back on may mirror the built-in screen: the roles swap
+        ext.configure_display_mirror_of_display(&cfg, &none).and_then(|()| builtin.configure_display_mirror_of_display(&cfg, ext))
     } else {
         // undo any mirroring among the connected displays
         ds.iter().try_for_each(|d| d.configure_display_mirror_of_display(&cfg, &none))
     };
     if let Err(e) = r {
         let _ = builtin.cancel_configuration(&cfg);
-        return Err(format!("mirror: {e}"));
+        return Err(format!("mirror: configure error {e}"));
     }
-    builtin.complete_configuration(&cfg, CGConfigureOption::ConfigureForSession).map_err(|e| format!("mirror: {e}"))
+    builtin.complete_configuration(&cfg, CGConfigureOption::ConfigureForSession).map_err(|e| format!("mirror: complete error {e}"))
+}
+
+/// Diagnostics: (id, built-in, id it mirrors or 0, active) of every connected display.
+pub fn display_states() -> Vec<(u32, bool, u32, bool)> {
+    online_displays().iter().map(|d| (d.id, d.is_builtin(), d.mirrors_display(), d.is_active())).collect()
 }
 
 /// The first connected external display (the shared monitor), if the built-in screen is on too:
