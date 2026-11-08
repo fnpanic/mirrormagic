@@ -174,6 +174,10 @@ async fn client_loop() {
         if lost.elapsed().as_secs() >= HDMI_BACK_S {
             hdmi_on("no PC for 5 min");
         }
+        if config::paused() {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            continue;
+        }
         match open(Channel::Control).await {
             Ok((tx, rx, name, host)) => {
                 status::update(|s| {
@@ -250,6 +254,9 @@ async fn session(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(),
     let r: Result<(), secure::Error> = async {
         loop {
             let m = tokio::time::timeout(Duration::from_secs(7), rx.recv()).await.map_err(|_| "PC timed out")??;
+            if config::paused() {
+                break Err("paused".into()); // the PC pings every 2 s, so this ends within 2 s
+            }
             handle(m, &utx);
         }
     }
@@ -379,7 +386,7 @@ pub fn shutdown() {
 }
 
 /// Monitor mode (or no PC for a while): turn the HDMI output on and wait until it is online.
-fn hdmi_on(why: &str) {
+pub fn hdmi_on(why: &str) {
     let Some(id) = HDMI_OFF.lock().unwrap().take() else { return };
     let r = sys::set_display_enabled(id, true);
     config::update(|c| c.hdmi_off = None);

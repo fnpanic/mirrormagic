@@ -43,13 +43,14 @@ type ViewProps = { snap: Snapshot; save: (p: Partial<Config>) => Promise<void>; 
 
 function Header({ s, role, version }: { s: Status; role: string; version: string }) {
   const peer = s.peer || (role === "pc" ? "the Mac" : "the PC");
-  const line = !s.connected
+  const line = s.paused ? "Paused: no connection, keyboard and mouse stay on this machine"
+    : !s.connected
     ? role === "pc" ? "Waiting for the Mac" : "Looking for the PC"
     : role === "pc" && !s.can_inject ? `${peer} is connected: allow Accessibility on the Mac to control it`
     : s.control === "edge" ? `${role === "pc" ? "Controlling" : "Controlled from"} ${peer}`
     : s.control === "monitor" ? "Monitor mode: the shared monitor shows the Mac"
     : `Connected to ${peer}`;
-  const dot = !s.connected ? "bg-warn" : s.control === "local" ? "bg-ok" : "bg-accent";
+  const dot = s.paused ? "bg-hairline" : !s.connected ? "bg-warn" : s.control === "local" ? "bg-ok" : "bg-accent";
   return (
     <header className="flex items-end justify-between pb-2">
       <div>
@@ -121,6 +122,12 @@ function Shared({ snap, save }: ViewProps) {
       </Row>
       <Row label={snap.role === "pc" ? "Start with Windows" : "Start at login"} hint="Runs quietly in the tray">
         <Toggle label="Start automatically" on={snap.autostart} onChange={async (v) => { await api.setAutostart(v); await save({}); }} />
+      </Row>
+      <Row label="Pause MirrorMagic" hint="Disconnects and stops sharing until you turn it off again (also in the tray menu)">
+        <Toggle label="Pause MirrorMagic" on={snap.status.paused} onChange={async (v) => { await api.setPaused(v); await save({}); }} />
+      </Row>
+      <Row label="Quit MirrorMagic" hint="Stops it until the next login or until you start it again">
+        <Btn onClick={() => void api.quit()}>Quit</Btn>
       </Row>
     </Card>
   );

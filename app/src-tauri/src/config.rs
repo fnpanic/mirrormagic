@@ -3,6 +3,7 @@ use mm_core::proto::Side;
 use mm_core::secure::PairingKey;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -43,6 +44,8 @@ pub struct Config {
     /// Mac: the shared monitor's display while MirrorMagic has its HDMI output off. macOS keeps
     /// it off after MirrorMagic ends (also on update or crash): the next start turns it on again.
     pub hdmi_off: Option<u32>,
+    /// Paused from the tray or window: no connection, no input sharing, until resumed (kept across restarts).
+    pub paused: bool,
 }
 
 impl Default for Config {
@@ -68,6 +71,7 @@ impl Default for Config {
             mic: true,
             mirrored: false,
             hdmi_off: None,
+            paused: false,
         }
     }
 }
@@ -94,8 +98,17 @@ fn cell() -> &'static Mutex<Config> {
             c.pairing_key = PairingKey::generate().to_display();
             save_to_disk(&c);
         }
+        PAUSED.store(c.paused, Ordering::SeqCst);
         Mutex::new(c)
     })
+}
+
+/// `paused` without cloning the config: checked for every message.
+static PAUSED: AtomicBool = AtomicBool::new(false);
+
+pub fn paused() -> bool {
+    cell();
+    PAUSED.load(Ordering::SeqCst)
 }
 
 fn save_to_disk(c: &Config) {
@@ -114,6 +127,7 @@ pub fn get() -> Config {
 pub fn update(f: impl FnOnce(&mut Config)) -> Config {
     let mut c = cell().lock().unwrap();
     f(&mut c);
+    PAUSED.store(c.paused, Ordering::SeqCst);
     save_to_disk(&c);
     c.clone()
 }

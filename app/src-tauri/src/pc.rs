@@ -220,6 +220,9 @@ fn recheck_mac_input(seq: u64) {
 /// the PC has control, the input hooks are removed: input reaches the app with zero added
 /// latency, and the pointer cannot cross to the Mac. Returns whether the hooks should be installed.
 pub fn hooks_wanted(fullscreen_in_front: Option<String>) -> bool {
+    if config::paused() {
+        return false; // no crossing, no hotkey: Windows input untouched
+    }
     static GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let game = fullscreen_in_front.is_some() && primary().state == State::Local;
     if GAME.swap(game, Ordering::SeqCst) != game {
@@ -361,6 +364,9 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
     // answer with the lower version: an older Mac keeps working while it waits for its update
     let agreed = version.min(PROTOCOL_VERSION);
     tx.send(&Msg::Hello { version: agreed, name: win::hostname(), channel }).await?;
+    if config::paused() {
+        return Err("paused".into()); // after the hello, so the Mac reports a lost connection, not a wrong key
+    }
     if agreed < mm_core::proto::MIN_COMPATIBLE_VERSION {
         status::update(|s| s.last_error = format!("{name} runs an incompatible MirrorMagic version"));
         return Err("version mismatch".into());
@@ -422,6 +428,9 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
         loop {
             // pings go out every 2 s, so silence for 7 s means the Mac is gone (sleep, Wi-Fi)
             let m = tokio::time::timeout(Duration::from_secs(7), rx.recv()).await.map_err(|_| "peer timed out")??;
+            if config::paused() {
+                return Err("paused".into()); // the Mac pings every 2 s, so this ends within 2 s
+            }
             match m {
                 Msg::Leave { along } => {
                     let out = primary().on_leave(along);

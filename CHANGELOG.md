@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.20 — 2026-11-08 (PC and Mac)
+
+- **Files copied on the Mac now paste on Windows.** The transfer itself worked: on 2026-11-08 at 22:03 and 22:04 the Mac pushed `logile_tether.txt` and `tether_input.txt`, and both arrived complete in `%TEMP%\MirrorMagiciles\<id>`. But arboard's Windows `file_list` writes CF_HDROP without emptying the clipboard first, so the text copied earlier stayed next to the files. Any app that prefers text (a chat box, an editor, the Explorer address bar) pasted that old text instead of the file. The PC now clears the clipboard before writing the file list. Ignored test `files_replace_text` (touches the real clipboard): passed. Before the fix, a probe left `UnicodeText` next to `FileDrop`; an Explorer paste of the file (Shell `Paste` verb) worked. On the Mac, arboard already clears the pasteboard. Pictures: PNG hand-overs worked both ways all along (both logs, `written`), and a copied picture file travels as a file.
+- **Pause and Quit.** The tray / menu-bar menu has **Pause MirrorMagic** (a checkmark) and **Quit MirrorMagic**, and the window's General card has a Pause switch and a Quit button, on both machines. Paused (`config.paused`, kept across restarts):
+  - The PC first takes keyboard, mouse and monitor back, then drops the session within 2 s and refuses new connections. Its input hooks are removed, so there is no crossing and no hotkey.
+  - The Mac stops dialing the PC and turns its HDMI output on, as it would be without MirrorMagic.
+  - Window and tray show "Paused". Unchecking resumes.
+
 ## 0.5.19 — 2026-11-08 (Mac)
 
 - **Ctrl+Alt+M: no more black monitor.** On 2026-11-08 at 11:49:50 the Mac turned its HDMI output on for monitor mode, but mirroring failed at once (`mirror true failed: mirror: 1001`). The freshly enabled monitor was still attaching and was missing from the active display list, so macOS refused the layout. The 2 s HDMI check treated "not mirrored" as "not in monitor mode" and switched the output off again at 11:49:52, so the monitor, already on HDMI, stayed black. Now:

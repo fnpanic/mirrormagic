@@ -175,6 +175,9 @@ pub fn files_dest(id: u64) -> std::path::PathBuf {
 /// Puts received files on the clipboard (paste in Explorer / Finder copies them).
 pub fn set_files(tops: Vec<std::path::PathBuf>) {
     let Ok(mut cb) = arboard::Clipboard::new() else { return };
+    // arboard's Windows file_list doesn't empty the clipboard: the old text stayed next to the
+    // files, and apps that prefer text pasted that instead (2026-11-08)
+    let _ = cb.clear();
     let r = cb.set().file_list(&tops);
     // remember them, so the next switch doesn't send them straight back
     let back = cb.get().file_list().unwrap_or(tops.clone());
@@ -266,5 +269,20 @@ mod tests {
         assert_eq!(back, px);
         assert_eq!(fingerprint(Some("a"), Some((3, 2, &px))), fingerprint(Some("a\n"), Some((w, h, &back))));
         assert_ne!(fingerprint(Some("a"), None), fingerprint(Some("b"), None));
+    }
+
+    /// Touches the real clipboard: `cargo test -p mirrormagic files_replace_text -- --ignored`
+    #[test]
+    #[ignore]
+    fn files_replace_text() {
+        let d = std::env::temp_dir().join("MirrorMagic").join("files").join("selftest");
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("selftest.txt");
+        std::fs::write(&f, "hello").unwrap();
+        arboard::Clipboard::new().unwrap().set_text("old text").unwrap();
+        set_files(vec![f.clone()]);
+        let mut cb = arboard::Clipboard::new().unwrap();
+        assert_eq!(cb.get().file_list().unwrap().len(), 1);
+        assert!(cb.get_text().is_err(), "old text must not stay next to the files");
     }
 }

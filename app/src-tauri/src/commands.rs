@@ -42,6 +42,29 @@ pub fn save_config(patch: Value) -> Result<(), String> {
     Ok(())
 }
 
+/// Pause (no connection, no input sharing) or resume. Shared by the window and the tray.
+#[tauri::command]
+pub fn set_paused(on: bool) {
+    #[cfg(windows)]
+    if on {
+        crate::pc::release(); // input and monitor back to the PC while the Mac still listens
+    }
+    config::update(|c| c.paused = on);
+    status::log(if on { "paused" } else { "resumed" });
+    #[cfg(target_os = "macos")]
+    if on {
+        crate::mac::hdmi_on("paused"); // the monitor may show the Mac again, as without MirrorMagic
+    }
+    status::update(|s| s.paused = on);
+}
+
+#[tauri::command]
+pub fn quit(app: tauri::AppHandle) {
+    #[cfg(windows)]
+    crate::win::restore_cursors();
+    app.exit(0)
+}
+
 #[tauri::command]
 pub fn set_autostart(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     let a = app.autolaunch();

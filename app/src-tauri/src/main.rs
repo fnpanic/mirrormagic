@@ -34,6 +34,8 @@ fn main() {
             commands::snapshot,
             commands::save_config,
             commands::set_autostart,
+            commands::set_paused,
+            commands::quit,
             commands::new_pairing_key,
             commands::set_input,
             commands::toggle_monitor,
@@ -47,6 +49,7 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory); // menu-bar app, no Dock icon
             status::init(app.handle().clone());
+            status::update(|s| s.paused = config::paused());
             tray::create(app)?;
             // runs on the main thread (macOS keyboard-layout APIs require it)
             #[cfg(windows)]

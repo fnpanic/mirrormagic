@@ -21,6 +21,7 @@ export interface Config {
   camera_auto: boolean;
   windows_shortcuts: boolean;
   mic: boolean;
+  paused: boolean;
 }
 export interface DisplayInfo { name: string; builtin: boolean; x: number; y: number; w: number; h: number }
 export interface Status {
@@ -41,6 +42,7 @@ export interface Status {
   obs: { installed: boolean; running: boolean; virtualcam: boolean; detail: string };
   last_error: string;
   clipboard: string;
+  paused: boolean;
 }
 export interface Snapshot {
   role: "pc" | "mac";
@@ -65,5 +67,7 @@ export const api = {
   setupObs: () => invoke<string>("setup_obs"),
   cameraNow: (on: boolean) => invoke<void>("camera_now", { on }),
   openPrivacy: () => invoke<void>("open_privacy"),
+  setPaused: (on: boolean) => invoke<void>("set_paused", { on }),
+  quit: () => invoke<void>("quit"),
   onStatus: (f: (s: Status) => void) => listen<Status>("status", (e) => f(e.payload)),
 };
