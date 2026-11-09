@@ -54,6 +54,14 @@ fn device_uid(dev: u32) -> Option<String> {
     (!s.is_null()).then(|| unsafe { CFString::wrap_under_create_rule(s) }.to_string())
 }
 
+/// The default output as "name (uid)", for the log.
+pub fn default_output() -> Option<String> {
+    let dev = get::<u32>(SYSTEM, cc(b"dOut"), None)?;
+    let s: CFStringRef = get::<usize>(dev, cc(b"lnam"), None).unwrap_or(0) as CFStringRef;
+    let name = if s.is_null() { String::new() } else { unsafe { CFString::wrap_under_create_rule(s) }.to_string() };
+    Some(format!("{name} ({})", device_uid(dev)?))
+}
+
 /// This process as a Core Audio process object (0 until it has talked to the audio system).
 pub fn own_process_object() -> u32 {
     let pid = std::process::id();
