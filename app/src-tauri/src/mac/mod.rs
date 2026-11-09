@@ -777,18 +777,15 @@ fn audio_watch() {
         }
         let used = |l: &[(u32, String)]| l.iter().find(|(d, _)| vaudio::in_use(*d)).map(|x| x.1.clone());
         let want: Want = (used(&mics), used(&speakers));
-        // diagnosis: does a new default output (HDMI in monitor mode) silence the "– PC" microphones?
         let out = vaudio::default_output();
         if out != last_out {
             status::log(format!("audio: default output now {out:?}"));
-            if let (None, Some((_, pc))) = (&want.0, mics.first()) {
-                status::log(format!("audio self-test after the output change: peak {}/32768", mic_selftest(pc)));
-            }
             last_out = out;
         }
         if want != last {
             status::log(format!("audio: Mac apps use PC microphone {:?}, PC speakers {:?}", want.0, want.1));
-            status::update(|s| s.mic_detail = format!("{} · {}", want.0.as_deref().unwrap_or("no PC microphone in use"), want.1.as_deref().unwrap_or("no PC speakers in use")));
+            let mic = want.0.as_ref().map_or("no PC microphone in use".into(), |m| format!("{m} in use (silent in Teams? add Teams under System Audio Recording Only)"));
+            status::update(|s| s.mic_detail = format!("{mic} · {}", want.1.as_deref().unwrap_or("no PC speakers in use")));
             last = want.clone();
         }
         let active = want != (None, None);

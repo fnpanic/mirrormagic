@@ -67,6 +67,7 @@ export const api = {
   setupObs: () => invoke<string>("setup_obs"),
   cameraNow: (on: boolean) => invoke<void>("camera_now", { on }),
   openPrivacy: () => invoke<void>("open_privacy"),
+  openAudioPrivacy: () => invoke<void>("open_audio_privacy"),
   setPaused: (on: boolean) => invoke<void>("set_paused", { on }),
   quit: () => invoke<void>("quit"),
   onStatus: (f: (s: Status) => void) => listen<Status>("status", (e) => f(e.payload)),

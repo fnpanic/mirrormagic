@@ -44,6 +44,7 @@ fn main() {
             commands::setup_obs,
             commands::camera_now,
             commands::open_privacy,
+            commands::open_audio_privacy,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

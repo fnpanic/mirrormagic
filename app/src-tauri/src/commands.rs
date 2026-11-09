@@ -118,6 +118,14 @@ pub fn camera_now(on: bool) {
     let _ = on;
 }
 
+/// Screen & System Audio Recording: apps reading a "– PC" microphone must be listed under
+/// "System Audio Recording Only", else macOS hands them silence.
+#[tauri::command]
+pub fn open_audio_privacy() {
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture").spawn();
+}
+
 #[tauri::command]
 pub fn open_privacy() {
     #[cfg(target_os = "macos")]

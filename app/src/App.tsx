@@ -349,8 +349,11 @@ function MacView(p: ViewProps) {
           <Toggle label="Start the PC camera automatically" on={c.camera_auto} onChange={(v) => save({ camera_auto: v })} />
         </Row>
         <Row label="PC audio" hint={s.mic_detail || "Each PC microphone and speaker appears on the Mac as '<name> – PC': pick them in Teams, Zoom or the browser"}>
-          <span className="text-caption text-muted">Allow "System Audio Recording" once</span>
+          <Btn onClick={api.openAudioPrivacy}>Open settings</Btn>
         </Row>
+        <p className="text-footnote text-muted">
+          The app using a '– PC' microphone (Teams, Zoom, the browser) must be added with + and switched on under <b className="font-semibold text-ink-80">System Audio Recording Only</b>, then restarted. Otherwise macOS gives it silence, while the '– PC' speakers still work.
+        </p>
         <Row label="Stream now" hint="Keep the PC camera on regardless">
           <ManualCamera />
         </Row>
