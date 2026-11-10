@@ -29,6 +29,8 @@ UI: failed actions show in the banner (also a failed first load); selects, input
 
 Removed: the unused `set_input` command, `hotkeyValid`, `ddc.current`, the `log` dependency.
 
+Deployed on 2026-11-10: the PC runs 0.5.28 since 22:05:40 (firewall rules now TCP and UDP 24850, local subnet); the Mac build (commit 66101ab, 47 Rust tests passed there) was installed and running at 22:07:06 and reconnected with protocol 7. Not tested by hand yet: a call with Pause and the Microphone switch, New key with the Mac connected, a monitor-mode Scroll Lock, the camera through OBS.
+
 Tests: `announced_sizes_cannot_wrap_past_the_limit`, a 60000 × 60000 PNG header, `only_loopback_hosts_are_served`, Scroll Lock in monitor mode, `Hotkey::is_usable`, renamed file names. Known limits, on purpose: other programs on the Mac can read the camera endpoint while the camera is on; a file transfer in flight finishes after a key change; two monitors of the same model cannot be told apart.
 
 ## 0.5.27 — 2026-11-09 (Mac)
