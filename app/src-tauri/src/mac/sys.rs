@@ -100,6 +100,11 @@ extern "C" {
     fn dlsym(handle: *mut c_void, name: *const std::ffi::c_char) -> *mut c_void;
 }
 
+/// How many external displays are connected.
+pub fn external_count() -> usize {
+    online_displays().iter().filter(|d| !d.is_builtin()).count()
+}
+
 /// IDs of all connected displays (on or mirroring).
 pub fn online_ids() -> Vec<u32> {
     online_displays().iter().map(|d| d.id).collect()

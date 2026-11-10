@@ -9,13 +9,13 @@ Share the Windows PC's keyboard, mouse, monitor, clipboard and webcam with a Mac
 | Switch either way | The clipboard comes with you: text, formatted text (HTML), images and **files/folders** (copy in Explorer, paste in Finder, and the other way round). Clipboard managers on both sides record it. |
 | Pick a "… – PC" microphone / speaker in Teams/Zoom/a browser on the Mac | That PC microphone becomes the Mac app's microphone, and the call's sound plays on that PC speaker. Audio streams only while an app uses one of the two devices. |
 | Open "OBS Virtual Camera" in Teams/Zoom/a browser on the Mac | The PC's webcam turns on and streams to the Mac. It runs only while an app uses the camera and turns off within a minute after the call (it follows the macOS camera-control log, so calls are not interrupted). |
-| Press **Scroll Lock** | Emergency exit: control returns to the PC at once. |
+| Press **Scroll Lock** | Emergency exit: control returns to the PC at once. In monitor mode the monitor switches back to the PC too. |
 
 Windows is the primary side (it owns keyboard, mouse and webcam). The Mac connects out to the PC over the LAN, which works on a locked-down corporate Mac that doesn't accept inbound connections.
 
 ## Install
 
-**PC**: run `dist/windows/MirrorMagic_<version>_x64-setup.exe`. The installer adds a firewall rule that only admits the local subnet. MirrorMagic lives in the tray; open it to see the **pairing key**.
+**PC**: run `dist/windows/MirrorMagic_<version>_x64-setup.exe`. The installer adds a firewall rule that only admits the local subnet, on port 24850 (TCP and UDP). MirrorMagic lives in the tray; open it to see the **pairing key**.
 
 **Mac**: unzip `dist/macos/MirrorMagic_macos_arm64.zip` into `/Applications`, then open it.
 1. Paste the pairing key and press Save. The PC address is found automatically, or you can enter it (e.g. `192.168.178.30`).
@@ -28,7 +28,8 @@ Windows is the primary side (it owns keyboard, mouse and webcam). The Mac connec
 
 - **Screen edge**: click where the Mac sits relative to the monitor. The default is left.
 - **Monitor mode**: the hotkey, and which input the Mac uses (HDMI 1/2…). The PC's own input is learned automatically.
-- **Camera**: resolution (the camera's native MJPEG, no re-encoding).
+- **Camera**: whether the Mac may use the webcam and the PC microphones, and the resolution (the camera's native MJPEG, no re-encoding).
+- **Shared monitor**: shown when more than one monitor answers DDC/CI; pick the one both machines are plugged into.
 - **General**: clipboard sharing, start with Windows.
 
 ## How it works
@@ -39,10 +40,10 @@ low-level hooks ──► state machine (mm-core) ─┐   ┌──► CGEvent 
 DDC/CI 0x60 ──► monitor input                │   │    DDC/CI over HDMI (switch back)
 webcam MJPEG (Media Foundation) ─────────────┼───┼──► 127.0.0.1 MJPEG ──► OBS ──► OBS Virtual Camera
 clipboard (text/HTML/PNG) ◄──────────────────┼───┼──► clipboard
-                      TCP 24850, Noise NNpsk0 (pairing key), 2 connections: control + camera
+          TCP 24850, Noise NNpsk0 (pairing key), one connection each: control, camera, audio, files
 ```
 
-- **Security**: every connection is encrypted and mutually authenticated with Noise `NNpsk0_25519_ChaChaPoly_BLAKE2s`, keyed with the 128-bit pairing key. A wrong key fails the handshake. LAN discovery (UDP broadcast) reveals only the PC's name. The camera stream reaches OBS only through 127.0.0.1 on the Mac.
+- **Security**: every connection is encrypted and mutually authenticated with Noise `NNpsk0_25519_ChaChaPoly_BLAKE2s`, keyed with the 128-bit pairing key. A wrong key fails the handshake. LAN discovery (UDP broadcast) reveals only the PC's name. The camera stream reaches OBS only through 127.0.0.1 on the Mac, and that endpoint refuses requests addressed to any other host name (other programs running on the Mac can still read it while the camera is on). Whoever holds the pairing key can do everything the other machine can: the window hides it until you press the eye button, and **New key** ends every running connection at once. **Pause**, and the **Camera** and **Microphone** switches on the PC, stop a running stream, not only the next one.
 - **No stuck keys**: each key and button is owned by the side that saw its press. Its release goes to the same side, and every switch releases everything on the Mac.
 - **Monitor switch-back**: many monitors ignore DDC on an inactive input. When you switch back, both the PC and the Mac (whose input is active then) send the command.
 - **Game mode**: while a full-screen game (or video) is in front, MirrorMagic removes its input hooks: no crossing at the edge, no hotkey, and zero added input latency. Leaving the game turns everything back on within half a second.

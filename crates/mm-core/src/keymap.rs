@@ -172,6 +172,11 @@ impl Hotkey {
         parts.join("+")
     }
 
+    /// Needs Ctrl, Alt or Win, or is a function key: Shift+letter would fire while typing.
+    pub fn is_usable(&self) -> bool {
+        self.mods.ctrl || self.mods.alt || self.mods.win || matches!(self.scan, 0x3B..=0x44 | 0x57 | 0x58 | 0x64..=0x6B)
+    }
+
     pub fn matches(&self, mods: Mods, scan: u16) -> bool {
         scan == self.scan && mods == self.mods
     }
@@ -299,6 +304,7 @@ impl KeyTranslator {
     /// Key-ups for everything still held (on Exit / disconnect).
     pub fn release_all(&mut self) -> Vec<MacKey> {
         self.altgr = false;
+        self.win = false;
         self.sent.drain().flat_map(|(_, codes)| codes.into_iter().rev().map(|c| (c, false))).collect()
     }
 }
@@ -370,6 +376,8 @@ mod tests {
         assert_eq!(Hotkey::parse("Shift+F12").unwrap().format(), "Shift+F12");
         assert_eq!(Hotkey::parse("Ctrl+Alt"), None);
         assert_eq!(Hotkey::parse("Ctrl+M+N"), None);
+        assert!(h.is_usable() && Hotkey::parse("Shift+F12").unwrap().is_usable() && Hotkey::parse("F13").unwrap().is_usable());
+        assert!(!Hotkey::parse("Shift+A").unwrap().is_usable() && !Hotkey::parse("M").unwrap().is_usable());
         let mut t = ModTracker::default();
         t.update(0x1D, true);
         t.update(0xE038, true); // AltGr counts as Alt

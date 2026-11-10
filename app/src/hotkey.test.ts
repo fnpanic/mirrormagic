@@ -23,6 +23,8 @@ describe("isUsableHotkey", () => {
     expect(isUsableHotkey("M")).toBe(false);
     expect(isUsableHotkey("Ctrl+Alt+M")).toBe(true);
     expect(isUsableHotkey("F13")).toBe(true);
+    expect(isUsableHotkey("Shift+F12")).toBe(true);
+    expect(isUsableHotkey("Shift+M")).toBe(false); // a capital M while typing
   });
 });
 

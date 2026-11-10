@@ -34,7 +34,8 @@ pub struct Status {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct DdcStatus {
     pub monitor: String,
-    pub current: Option<u16>,
+    /// Every monitor that answers DDC.
+    pub monitors: Vec<String>,
     pub inputs: Vec<u16>,
     pub last: String,
 }

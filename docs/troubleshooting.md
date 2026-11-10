@@ -3,10 +3,14 @@
 | Symptom | Check |
 |---|---|
 | Mac says "no PC found" | Is MirrorMagic running on the PC (tray)? Enter the PC's IP on the Mac. The firewall rule "MirrorMagic" must exist (the installer creates it, local subnet only). |
-| "the PC refused the pairing key" | Copy the key again from the PC window. Generating a new key on the PC disconnects old Macs. |
+| "…: handshake failed (wrong pairing key?)" (before 0.5.28: "the PC refused the pairing key") | Copy the key again from the PC window (eye button shows it). Generating a new key on the PC disconnects the Mac at once. The message also appears when the address belongs to another program or machine: with automatic discovery the Mac tries every PC that answers. On the PC, "refused …: no handshake" is a connection that sent nothing (a port scan, for example). |
+| Settings are back to defaults; the window says "settings file was damaged" | `config.json` could not be read as JSON. It was kept as `config.json.bad` next to the new one; on the PC a new pairing key was made, so enter it on the Mac again. |
+| Camera stays "Off" on the PC, the Mac says "Camera sharing is switched off on the PC" | The **Camera** switch in the PC window is off. |
+| Mac log `HDMI output left on: more than one external display is connected` | With two external displays MirrorMagic cannot tell which one is shared and switches none off. |
+| Mac: "OBS remote control is off: quit OBS and press Set up again" | OBS was started by hand without MirrorMagic's remote control. Since 0.5.28 only the **Set up OBS** button restarts a running OBS; a camera that opens by itself never quits it. |
 | Pointer doesn't cross | Is the edge toggle on? Is the Mac connected (green dot)? Release all mouse buttons, because nothing crosses while dragging. The edge must be an outer edge of the PC desktop. |
 | Mac doesn't react to keys/mouse | Accessibility isn't granted (banner in the Mac app). |
-| Stuck "on the Mac" | Press **Scroll Lock**, or "Take control back" in the PC window. A dropped connection also returns control within 7 s. |
+| Stuck "on the Mac" | Press **Scroll Lock**, or "Take control back" in the PC window. In monitor mode both also switch the monitor back to the PC (0.5.28). A dropped connection also returns control within 7 s. |
 | Monitor doesn't switch back | Many monitors accept DDC only on the active input; MirrorMagic asks the Mac too. If neither works, use the monitor's input button. The PC window shows the last DDC result. |
 | Wrong characters on the Mac | Mapping is positional; the Mac's layout decides. Try "German AltGr keys" On/Off. |
 | Clipboard didn't come along | The clipboard is handed over when you switch, not continuously. Copy, then cross. Is "Share the clipboard" on (both sides)? |

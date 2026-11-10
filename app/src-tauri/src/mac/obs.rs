@@ -113,8 +113,11 @@ struct Client {
 
 impl Client {
     async fn connect(password: &str) -> Result<Client, String> {
-        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{PORT}")).await.map_err(|e| e.to_string())?;
-        let hello = Self::read(&mut ws).await?;
+        let (mut ws, _) = tokio::time::timeout(Duration::from_secs(3), tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{PORT}")))
+            .await
+            .map_err(|_| "OBS did not answer".to_string())?
+            .map_err(|e| e.to_string())?;
+        let hello = Self::read(&mut ws, 5).await?;
         let mut d = json!({ "rpcVersion": 1, "eventSubscriptions": 0 });
         if let Some(a) = hello["d"]["authentication"].as_object() {
             let (salt, challenge) = (a["salt"].as_str().unwrap_or(""), a["challenge"].as_str().unwrap_or(""));
@@ -122,21 +125,23 @@ impl Client {
             d["authentication"] = json!(B64.encode(Sha256::digest(format!("{secret}{challenge}"))));
         }
         ws.send(Message::Text(json!({ "op": 1, "d": d }).to_string().into())).await.map_err(|e| e.to_string())?;
-        let ident = Self::read(&mut ws).await?;
+        let ident = Self::read(&mut ws, 5).await?;
         if ident["op"] != 2 {
             return Err("OBS refused the password".into());
         }
         Ok(Client { ws, next: 1 })
     }
 
-    async fn read(ws: &mut Ws) -> Result<Value, String> {
+    async fn read(ws: &mut Ws, secs: u64) -> Result<Value, String> {
         loop {
-            match ws.next().await {
-                Some(Ok(Message::Text(t))) => return serde_json::from_str(&t).map_err(|e| e.to_string()),
-                Some(Ok(Message::Close(f))) => return Err(format!("OBS closed the connection: {f:?}")),
-                Some(Ok(_)) => continue,
-                Some(Err(e)) => return Err(e.to_string()),
-                None => return Err("OBS closed the connection".into()),
+            // a frozen OBS still accepts connections: without a limit the camera watcher waits forever
+            match tokio::time::timeout(Duration::from_secs(secs), ws.next()).await {
+                Err(_) => return Err("OBS did not answer".into()),
+                Ok(Some(Ok(Message::Text(t)))) => return serde_json::from_str(&t).map_err(|e| e.to_string()),
+                Ok(Some(Ok(Message::Close(f)))) => return Err(format!("OBS closed the connection: {f:?}")),
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(e))) => return Err(e.to_string()),
+                Ok(None) => return Err("OBS closed the connection".into()),
             }
         }
     }
@@ -147,7 +152,7 @@ impl Client {
         let req = json!({ "op": 6, "d": { "requestType": ty, "requestId": id, "requestData": data } });
         self.ws.send(Message::Text(req.to_string().into())).await.map_err(|e| e.to_string())?;
         loop {
-            let v = Self::read(&mut self.ws).await?;
+            let v = Self::read(&mut self.ws, 15).await?; // starting the virtual camera can take a while
             if v["op"] == 7 && v["d"]["requestId"] == id.as_str() {
                 let st = &v["d"]["requestStatus"];
                 if st["result"] == true {
@@ -160,14 +165,15 @@ impl Client {
 }
 
 /// Makes OBS feed the virtual camera from our stream. `start_obs`: launch it if not running.
-pub async fn ensure(stream_url: &str, start_obs: bool, virtualcam: bool) -> Result<String, String> {
+/// `may_restart`: quit and relaunch an OBS that runs without our remote control.
+pub async fn ensure(stream_url: &str, start_obs: bool, may_restart: bool, virtualcam: bool) -> Result<String, String> {
     if !installed() {
         return Err("OBS is not installed (get it from obsproject.com)".into());
     }
     let mut password = crate::config::get().obs_password;
     // OBS running without (our) remote control, e.g. started by hand: restart it once with
     // remote control enabled instead of asking the user to do that
-    if running() && start_obs && !password.is_empty() {
+    if running() && start_obs && may_restart && !password.is_empty() {
         let mut reachable = false;
         for _ in 0..6 {
             if Client::connect(&password).await.is_ok() {

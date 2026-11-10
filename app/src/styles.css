@@ -17,6 +17,7 @@
   --color-muted: var(--muted);
   --color-faint: var(--faint);
   --color-hairline: var(--hairline);
+  --color-track: var(--track);
   --color-accent: var(--accent);
   --color-focus: var(--focus);
   --color-ok: var(--ok);
@@ -78,11 +79,13 @@
   --ink: #1d1d1f;
   --ink-80: #333333;
   --muted: #6e6e73;
-  --faint: #7a7a7a;
+  --faint: #6e6e73;
   --hairline: rgba(0, 0, 0, 0.08);
+  /* off switches and the paused dot: 3:1 against the card, unlike the hairline */
+  --track: #8e8e93;
   --accent: #0066cc;
   --focus: #0071e3;
-  --ok: #1f9d55;
+  --ok: #18794a;
   --warn: #b25000;
   --danger: #d70015;
   color-scheme: light;
@@ -96,8 +99,9 @@
   --ink: #f5f5f7;
   --ink-80: #cccccc;
   --muted: #98989d;
-  --faint: #6e6e73;
+  --faint: #98989d;
   --hairline: rgba(255, 255, 255, 0.1);
+  --track: #7c7c80;
   --accent: #2997ff;
   --focus: #2997ff;
   --ok: #30d158;

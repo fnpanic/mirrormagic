@@ -230,7 +230,7 @@ impl Primary {
             // Emergency release, works even if the Mac is gone.
             if scan == SCAN_SCROLL_LOCK && remote {
                 self.keys.insert(scan, Owner::Nobody);
-                self.release(None, &mut out);
+                self.release_or_monitor_back(&mut out);
                 out.block = true;
                 return out;
             }
@@ -362,8 +362,18 @@ impl Primary {
     /// Emergency / UI "take control back".
     pub fn release_now(&mut self) -> Out {
         let mut out = Out::default();
-        self.release(None, &mut out);
+        self.release_or_monitor_back(&mut out);
         out
+    }
+
+    /// In monitor mode the monitor comes back too: input on the PC behind a monitor that shows
+    /// the Mac would be typing blind.
+    fn release_or_monitor_back(&mut self, out: &mut Out) {
+        if self.monitor_on_mac {
+            self.toggle_monitor_inner(out);
+        } else {
+            self.release(None, out);
+        }
     }
 }
 
@@ -506,6 +516,12 @@ mod tests {
         assert_eq!(p.state, State::Local);
         assert!(p.key(SCAN_SCROLL_LOCK, false).block);
         assert!(!p.key(SCAN_SCROLL_LOCK, true).block); // local Scroll Lock works otherwise
+        p.key(SCAN_SCROLL_LOCK, false);
+        // in monitor mode the monitor comes back with the input
+        p.toggle_monitor();
+        let o = p.key(SCAN_SCROLL_LOCK, true);
+        assert!(o.actions.contains(&Action::SwitchMonitor(false)));
+        assert!(!p.monitor_on_mac && p.state == State::Local);
     }
 
     #[test]

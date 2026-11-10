@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.5.28 — 2026-11-10 (PC and Mac)
+
+Result of a full review (code, UI, security design; an independent blind review and a judge checked the findings, a second blind review checked the changes).
+
+Switches that did not do what they said:
+- **Pause** and the PC's **Microphone** switch now stop a running microphone or speaker stream. Before, only the input session ended and a call kept the PC microphone until the Mac app let go.
+- **New key** ends every running connection at once (control, camera, audio). Before, a connected Mac stayed connected with the old key. The button asks first, and the key is hidden behind an eye button.
+- **Share the clipboard** off now also refuses copied files.
+- The PC's camera status no longer sticks on "Streaming" after a call. New **Camera** switch on the PC (like Microphone).
+- Mac: pointer speed, natural scrolling, Windows shortcuts and AltGr keys apply when saved, not at the next crossing.
+
+Robustness:
+- An audio connection that a newer one replaced ended in a busy loop on one network thread. It now ends.
+- Sound for an output that cannot be opened is dropped instead of queued without limit (about 350 MB per hour of call).
+- File transfers: announced sizes can no longer wrap past the 4 GB limit; a clipboard picture whose header claims more than 256 MB of pixels is refused before memory is reserved.
+- A control session that replaces a live one gets `Enter` again (dead Mac pointer after a network change).
+- Scroll Lock and "Take control back" in monitor mode switch the monitor back too; Quit on the PC does the same. Game mode no longer removes the hotkey while the monitor shows the Mac.
+- A settings file that does not parse is kept as `config.json.bad` and the window says so; a failed save is reported. Saving merges under the lock.
+- Mac: OBS calls time out after 5 s; a running OBS without remote control is only restarted by the **Set up OBS** button. The camera endpoint refuses requests for other host names and reports a busy port.
+- Mac: discovery tries every PC that answers (bounded: 1.5 s, 16 answers); the hello has a timeout; IPv6 addresses work. With two external displays none is switched off.
+- PC: at most 32 handshakes at a time; the firewall rule is limited to port 24850; "wrong pairing key" is no longer claimed for port scans or shown over a working session; connection, microphone and speaker errors reach MirrorMagic.log (they went to a logger that was never installed).
+- File names with characters Windows forbids (`: ? * " < > |`) are renamed with `_` instead of failing the transfer.
+- Hotkeys need Ctrl, Alt or Win (or a function key); the current hotkey does not fire while a new one is recorded.
+- With several DDC monitors on the PC, **Shared monitor** picks the one to switch.
+
+UI: failed actions show in the banner (also a failed first load); selects, inputs and icon buttons have names for screen readers; off switches and the paused dot are visible (3:1); the monitor-input list always contains the configured input.
+
+Removed: the unused `set_input` command, `hotkeyValid`, `ddc.current`, the `log` dependency.
+
+Tests: `announced_sizes_cannot_wrap_past_the_limit`, a 60000 × 60000 PNG header, `only_loopback_hosts_are_served`, Scroll Lock in monitor mode, `Hotkey::is_usable`, renamed file names. Known limits, on purpose: other programs on the Mac can read the camera endpoint while the camera is on; a file transfer in flight finishes after a key change; two monitors of the same model cannot be told apart.
+
 ## 0.5.27 — 2026-11-09 (Mac)
 
 - **Teams call in monitor mode: the PC headset's microphone didn't reach the other side, the call sound did.** The logs show the PC microphone reached the Mac (call at 09:01:50–09:02:29, peaks 4993, 7792, 26963/32768) and that Teams had "Mikrofon (Jabra Link 390) – PC" open. The loss was between the tap and Teams. Cause: Microsoft Teams was no longer in System Settings → Privacy & Security → Screen & System Audio Recording → *System Audio Recording Only* (it was added on 2026-11-06, see 0.5.18). Without that permission macOS gives an app silence from a tap-based microphone, while the "– PC" speakers keep working. It was not specific to monitor mode: the call at 09:19 in edge mode behaved the same. Why the entry disappeared is unknown (a Teams update or an MDM reset are candidates). MirrorMagic resets no permissions, and Tether resets only its own.

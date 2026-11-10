@@ -21,6 +21,8 @@ export interface Config {
   camera_auto: boolean;
   windows_shortcuts: boolean;
   mic: boolean;
+  camera: boolean;
+  ddc_monitor: string;
   paused: boolean;
 }
 export interface DisplayInfo { name: string; builtin: boolean; x: number; y: number; w: number; h: number }
@@ -32,7 +34,7 @@ export interface Status {
   control: "local" | "edge" | "monitor";
   monitor_on_mac: boolean;
   game_mode: boolean;
-  ddc: { monitor: string; current: number | null; inputs: number[]; last: string };
+  ddc: { monitor: string; monitors: string[]; inputs: number[]; last: string };
   camera_on: boolean;
   camera_detail: string;
   camera_wanted: boolean;
@@ -49,10 +51,10 @@ export interface Snapshot {
   version: string;
   config: Config;
   pairingValid: boolean;
-  hotkeyValid: boolean;
   autostart: boolean;
   status: Status;
-  inputs: { value: number; name: string }[];
+  /** Set when the settings file was damaged and defaults were restored. */
+  notice: string | null;
 }
 
 export const api = {
@@ -60,7 +62,7 @@ export const api = {
   save: (patch: Partial<Config>) => invoke<void>("save_config", { patch }),
   setAutostart: (on: boolean) => invoke<void>("set_autostart", { on }),
   newPairingKey: () => invoke<string>("new_pairing_key"),
-  setInput: (value: number) => invoke<string>("set_input", { value }),
+  hotkeyRecording: (on: boolean) => invoke<void>("hotkey_recording", { on }),
   toggleMonitor: () => invoke<void>("toggle_monitor"),
   takeBack: () => invoke<void>("take_back"),
   discover: () => invoke<[string, string][]>("discover"),

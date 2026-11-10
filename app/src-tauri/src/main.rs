@@ -37,7 +37,7 @@ fn main() {
             commands::set_paused,
             commands::quit,
             commands::new_pairing_key,
-            commands::set_input,
+            commands::hotkey_recording,
             commands::toggle_monitor,
             commands::take_back,
             commands::discover,
@@ -67,6 +67,9 @@ fn main() {
             if let WindowEvent::CloseRequested { api, .. } = e {
                 api.prevent_close(); // keep running in the tray
                 let _ = w.hide();
+                #[cfg(windows)]
+                pc::reload_config(); // a hotkey recording the hidden window never finished
+
             }
         })
         .build(tauri::generate_context!())

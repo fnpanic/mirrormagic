@@ -1,5 +1,5 @@
 //! Commands for the settings window.
-use crate::{config, ddc, status};
+use crate::{config, status};
 use serde_json::{json, Value};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -11,35 +11,76 @@ pub fn snapshot(app: tauri::AppHandle) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "config": c,
         "pairingValid": config::pairing_key().is_some(),
-        "hotkeyValid": mm_core::keymap::Hotkey::parse(&c.monitor_hotkey).is_some(),
         "autostart": app.autolaunch().is_enabled().unwrap_or(false),
         "status": status::get(),
-        "inputs": status::get().ddc.inputs.iter().map(|&v| json!({ "value": v, "name": ddc::input_name(v) })).collect::<Vec<_>>(),
+        "notice": config::load_error(),
     })
 }
 
 /// Merges `patch` (a partial Config) into the settings and applies it.
 #[tauri::command]
 pub fn save_config(patch: Value) -> Result<(), String> {
+    let has = |k: &str| patch.get(k).is_some();
+    // state the backend keeps for itself, and (PC) the key, which only "New key" replaces
+    if ["mirrored", "hdmi_off", "paused", "obs_password", "pc_input"].iter().any(|k| has(k)) || (cfg!(windows) && has("pairing_key")) {
+        return Err("that setting cannot be changed here".into());
+    }
     if let Some(h) = patch.get("monitor_hotkey").and_then(Value::as_str) {
-        mm_core::keymap::Hotkey::parse(h).ok_or("unknown hotkey")?;
+        let h = mm_core::keymap::Hotkey::parse(h).ok_or("unknown hotkey")?;
+        if !h.is_usable() {
+            return Err("a hotkey needs Ctrl, Alt or Win (or is a function key)".into());
+        }
     }
     if let Some(k) = patch.get("pairing_key").and_then(Value::as_str) {
         if !k.trim().is_empty() {
             mm_core::secure::PairingKey::parse(k).ok_or("that is not a valid pairing key (30 characters)")?;
         }
     }
-    let mut v = serde_json::to_value(config::get()).map_err(|e| e.to_string())?;
-    if let (Some(dst), Some(src)) = (v.as_object_mut(), patch.as_object()) {
-        for (k, val) in src {
-            dst.insert(k.clone(), val.clone());
+    if patch.get("speed").is_some_and(|s| !s.as_f64().is_some_and(|s| (0.25..=4.0).contains(&s))) {
+        return Err("pointer speed must be between 0.25 and 4".into());
+    }
+    // merged under the config lock: a value another thread saves meanwhile (learned PC input, HDMI state) survives
+    let mut err = None;
+    config::update(|c| {
+        let merged = serde_json::to_value(&*c).and_then(|mut v| {
+            if let (Some(dst), Some(src)) = (v.as_object_mut(), patch.as_object()) {
+                for (k, val) in src {
+                    dst.insert(k.clone(), val.clone());
+                }
+            }
+            serde_json::from_value::<config::Config>(v)
+        });
+        match merged {
+            Ok(new) => *c = new,
+            Err(e) => err = Some(e.to_string()),
+        }
+    });
+    if let Some(e) = err {
+        return Err(e);
+    }
+    // applied even when the file could not be written: the running app already has the new values
+    let saved = config::take_error();
+    #[cfg(windows)]
+    {
+        crate::pc::reload_config();
+        if has("mic") || has("camera") {
+            crate::pc::sharing_changed(has("mic"), has("camera")); // a running stream stops (or starts) with the switch
+        }
+        if has("ddc_monitor") {
+            std::thread::spawn(crate::pc::probe_ddc);
         }
     }
-    let new: config::Config = serde_json::from_value(v).map_err(|e| e.to_string())?;
-    config::update(|c| *c = new);
+    #[cfg(target_os = "macos")]
+    crate::mac::refresh(); // speed, scrolling and key options apply now, not at the next crossing
+    saved.map_or(Ok(()), Err)
+}
+
+/// While the window records a new hotkey, the current one must not fire.
+#[tauri::command]
+pub fn hotkey_recording(on: bool) {
     #[cfg(windows)]
-    crate::pc::reload_config();
-    Ok(())
+    crate::pc::hotkey_recording(on);
+    let _ = on;
 }
 
 /// Pause (no connection, no input sharing) or resume. Shared by the window and the tray.
@@ -61,7 +102,7 @@ pub fn set_paused(on: bool) {
 #[tauri::command]
 pub fn quit(app: tauri::AppHandle) {
     #[cfg(windows)]
-    crate::win::restore_cursors();
+    crate::pc::shutdown();
     app.exit(0)
 }
 
@@ -71,16 +112,15 @@ pub fn set_autostart(app: tauri::AppHandle, on: bool) -> Result<(), String> {
     if on { a.enable() } else { a.disable() }.map_err(|e| e.to_string())
 }
 
+/// A new key locks the old one out: running connections end too.
 #[tauri::command]
 pub fn new_pairing_key() -> String {
     let k = mm_core::secure::PairingKey::generate().to_display();
     config::update(|c| c.pairing_key = k.clone());
+    #[cfg(windows)]
+    crate::pc::revoke_sessions();
+    status::log("new pairing key: connections with the old key ended");
     k
-}
-
-#[tauri::command]
-pub async fn set_input(value: u16) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || ddc::set_input(value)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -106,7 +146,7 @@ pub async fn discover() -> Vec<(String, String)> {
 #[tauri::command]
 pub async fn setup_obs() -> Result<String, String> {
     #[cfg(target_os = "macos")]
-    return crate::mac::setup_obs(true).await;
+    return crate::mac::setup_obs(true, true).await; // the button may restart an OBS without remote control
     #[cfg(not(target_os = "macos"))]
     Err("macOS only".into())
 }

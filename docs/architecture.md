@@ -4,7 +4,7 @@
 
 | Path | What |
 |---|---|
-| `crates/mm-core/src/proto.rs` | Wire messages (postcard). `PROTOCOL_VERSION` must match on both sides. |
+| `crates/mm-core/src/proto.rs` | Wire messages (postcard). The PC answers with the lower of both `PROTOCOL_VERSION`s; peers older than `MIN_COMPATIBLE_VERSION` are refused. |
 | `crates/mm-core/src/secure.rs` | Noise `NNpsk0` channel and the pairing key (Crockford base32, 26 chars). Messages are chunked over 64 KiB Noise frames. |
 | `crates/mm-core/src/primary.rs` | PC state machine: edge detection, key/button ownership, monitor-mode toggle, emergency exit. Pure and unit-tested. |
 | `crates/mm-core/src/secondary.rs` | Mac cursor logic: entry point, clamping per display, return edge. |
@@ -34,4 +34,15 @@
 - Hook callbacks must return in milliseconds or Windows silently unhooks them. The callbacks only lock the state machine and queue messages. UI updates, cursor hiding, DDC and clipboard work run on other threads.
 - Injected events (`LLKHF_INJECTED`/`LLMHF_INJECTED`) are ignored, so remote-control tools on the PC never cross to the Mac.
 - No crossing while a mouse button is held, so drag-and-drop stays on the PC.
-- The hidden cursor uses `SetSystemCursor`. Start-up and Quit call `SPI_SETCURSORS`, so a crash can't leave the cursor invisible.
+- The hidden cursor uses `SetSystemCursor`. Start-up and Quit call `SPI_SETCURSORS`, so a cursor left invisible by a crash is healed by the next start.
+
+## What ends a connection (PC)
+
+- `pc::must_end`: every channel loop (control, camera, audio) asks it. It answers "paused" or "pairing key changed" (`KEY_GEN`, bumped by `commands::new_pairing_key`). A file transfer in flight finishes.
+- At most 32 handshakes run at a time (`HANDSHAKES`); the permit is returned after the hello.
+- The Mac's wishes are kept (`MIC_WANT`, `CAM_WANT`) apart from what the PC allows (`config.mic`, `config.camera`): switching either in the window stops or starts the stream at once (`pc::sharing_changed`).
+- A control session that replaces a live one (the Mac's socket died one-sidedly and it reconnected within the 7 s timeout) gets `Primary::connected()` on its first `PeerInfo`, which sends `Enter` again.
+
+## Settings
+
+`commands::save_config` merges the patch under the config lock and refuses the fields the backend keeps for itself (`mirrored`, `hdmi_off`, `paused`, `obs_password`, `pc_input`, and on the PC `pairing_key`). A settings file that does not parse is kept as `config.json.bad`, and the window says so. On the Mac, saved settings apply at once (`mac::refresh`).

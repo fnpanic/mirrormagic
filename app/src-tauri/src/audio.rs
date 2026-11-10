@@ -74,7 +74,7 @@ pub fn capture(device: Option<String>, stop: Arc<AtomicBool>, chunk: impl FnMut(
             }
         };
         let config: StreamConfig = cfg.config();
-        let err = |e| log::warn!("microphone: {e}");
+        let err = |e| crate::status::log(format!("microphone: {e}"));
         let stream = match cfg.sample_format() {
             SampleFormat::F32 => dev.build_input_stream::<f32, _, _>(config, move |d, _| push(to_mono_i16(d, channels)), err, None),
             SampleFormat::I16 => dev.build_input_stream::<i16, _, _>(
@@ -100,6 +100,9 @@ pub fn capture(device: Option<String>, stop: Arc<AtomicBool>, chunk: impl FnMut(
 
 /// The device with exactly this name, else the first whose name contains it.
 fn by_name(list: Option<Vec<cpal::Device>>, n: &str) -> Option<cpal::Device> {
+    if n.is_empty() {
+        return None; // "" is contained in every name
+    }
     let list = list.unwrap_or_default();
     let i = list.iter().position(|d| name(d) == n).or_else(|| list.iter().position(|d| name(d).contains(n)))?;
     list.into_iter().nth(i)
@@ -137,7 +140,7 @@ pub fn play(rate: u32, device: Option<String>, stop: Arc<AtomicBool>) -> Result<
                     frame.iter_mut().for_each(|x| *x = s);
                 }
             },
-            |e| log::warn!("speaker: {e}"),
+            |e| crate::status::log(format!("speaker: {e}")),
             None,
         );
         let stream = match stream.and_then(|s| s.play().map(|_| s)) {
@@ -150,8 +153,7 @@ pub fn play(rate: u32, device: Option<String>, stop: Arc<AtomicBool>) -> Result<
         }
         drop(stream);
     });
-    let device = rx.recv_timeout(Duration::from_secs(5)).map_err(|_| "speaker did not start".to_string())??;
-    log::info!("playing on {device}");
+    rx.recv_timeout(Duration::from_secs(5)).map_err(|_| "speaker did not start".to_string())??;
     Ok(buf)
 }
 
@@ -178,7 +180,8 @@ pub fn reader(mut rx: mm_core::secure::Receiver) -> (tokio::task::JoinHandle<()>
 pub struct Player {
     /// Output by name; None: the default output.
     pub device: Option<String>,
-    cur: Option<(u32, Arc<AtomicBool>, Queue)>,
+    /// The queue is None when the output could not be opened: chunks are dropped, not piled up.
+    cur: Option<(u32, Arc<AtomicBool>, Option<Queue>)>,
 }
 
 impl Player {
@@ -198,10 +201,10 @@ impl Player {
             let stop = Arc::new(AtomicBool::new(false));
             let q = play(rate, self.device.clone(), stop.clone());
             opened = Some(q.as_ref().map(|_| ()).map_err(|e| e.clone()));
-            // on failure keep an unplayed queue: don't retry every 10 ms
-            self.cur = Some((rate, stop, q.unwrap_or_default()));
+            // on failure remember the rate: don't retry every 10 ms
+            self.cur = Some((rate, stop, q.ok()));
         }
-        if let Some((_, _, q)) = &self.cur {
+        if let Some((_, _, Some(q))) = &self.cur {
             q.lock().unwrap().extend(pcm);
         }
         opened

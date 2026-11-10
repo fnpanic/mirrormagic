@@ -10,6 +10,8 @@ use std::sync::Mutex;
 
 const MAX_TEXT: usize = 8 << 20;
 const MAX_PNG: usize = 12 << 20;
+/// Decoded image limit (bytes): 8K RGBA is 133 MB.
+const MAX_PIXELS: usize = 256 << 20;
 /// Whole message stays under the channel limit (16 MiB) with room to spare.
 const MAX_TOTAL: usize = 14 << 20;
 
@@ -44,6 +46,10 @@ fn decode_png(bytes: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
     let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::ALPHA);
     let mut r = dec.read_info().ok()?;
+    // the size comes from the sender's header: a tiny file may claim gigabytes
+    if r.output_buffer_size() > MAX_PIXELS {
+        return None;
+    }
     let mut buf = vec![0; r.output_buffer_size()];
     let info = r.next_frame(&mut buf).ok()?;
     buf.truncate(info.buffer_size());
@@ -86,6 +92,9 @@ fn take() -> Option<Msg> {
     }
     if size(&text, &html, &png) > MAX_TOTAL {
         png = None;
+    }
+    if text.is_none() && png.is_none() {
+        return None; // the picture was too big to send
     }
     Some(Msg::Clipboard { text, html, png })
 }
@@ -246,9 +255,6 @@ pub fn receive(text: Option<String>, html: Option<String>, png: Option<Vec<u8>>)
         Ok(()) => crate::status::log("clipboard: written"),
         Err(e) => crate::status::log(format!("clipboard: write failed: {e}")),
     }
-    if let Err(e) = r {
-        log::warn!("clipboard write failed: {e}");
-    }
     // Fingerprint what the OS now returns (images come back with converted pixels), so the
     // next hand-over recognises an unchanged clipboard and doesn't bounce it back.
     let text = cb.get_text().ok().filter(|t| !t.is_empty());
@@ -260,6 +266,17 @@ pub fn receive(text: Option<String>, html: Option<String>, png: Option<Vec<u8>>)
 mod tests {
     use super::*;
 
+    fn crc32(data: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in data {
+            c ^= b as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+        }
+        !c
+    }
+
     #[test]
     fn png_roundtrip_keeps_pixels_and_fingerprint() {
         let px: Vec<u8> = (0..4 * 3 * 2).map(|i| (i * 37) as u8).collect();
@@ -269,6 +286,12 @@ mod tests {
         assert_eq!(back, px);
         assert_eq!(fingerprint(Some("a"), Some((3, 2, &px))), fingerprint(Some("a\n"), Some((w, h, &back))));
         assert_ne!(fingerprint(Some("a"), None), fingerprint(Some("b"), None));
+        // a header that claims 60000 x 60000 pixels is refused before anything is allocated
+        let mut huge = png.clone();
+        huge[16..24].copy_from_slice(&[0, 0, 0xEA, 0x60, 0, 0, 0xEA, 0x60]);
+        let crc = crc32(&huge[12..29]).to_be_bytes();
+        huge[29..33].copy_from_slice(&crc);
+        assert!(decode_png(&huge).is_none());
     }
 
     /// Touches the real clipboard: `cargo test -p mirrormagic files_replace_text -- --ignored`

@@ -50,7 +50,7 @@ fn german(c: &config::Config) -> bool {
 }
 
 /// Re-reads displays, keyboard layout and permissions; returns PeerInfo for the PC.
-fn refresh() -> Msg {
+pub fn refresh() -> Msg {
     let c = config::get();
     let ds = sys::displays();
     if let Some((edge, monitor)) = sys::layout(&ds) {
@@ -96,7 +96,7 @@ pub fn start(rt: &tokio::runtime::Handle) {
     std::thread::spawn(camera_watch);
     std::thread::spawn(audio_watch);
     if !c.obs_password.is_empty() && c.camera_auto {
-        rt.spawn(async { setup_obs(true).await });
+        rt.spawn(async { setup_obs(true, false).await });
     } else {
         obs_status(String::new());
     }
@@ -113,9 +113,11 @@ fn obs_status(detail: String) {
     });
 }
 
-pub async fn setup_obs(start: bool) -> Result<String, String> {
+/// `restart`: an OBS that runs without our remote control may be quit and started again. Only the
+/// "Set up OBS" button allows that: a camera opening by itself must not end someone's recording.
+pub async fn setup_obs(start: bool, restart: bool) -> Result<String, String> {
     // the virtual camera runs only while an app watches (camera_watch switches it)
-    let r = obs::ensure(mjpeg::URL, start, CAM_WANTED.load(Ordering::SeqCst)).await;
+    let r = obs::ensure(mjpeg::URL, start, restart, CAM_WANTED.load(Ordering::SeqCst)).await;
     status::log(format!("obs setup: {r:?}"));
     let ok = r.is_ok();
     let vc = ok && CAM_WANTED.load(Ordering::SeqCst);
@@ -128,44 +130,78 @@ pub async fn setup_obs(start: bool) -> Result<String, String> {
 
 // ---------------------------------------------------------------- PC connection
 
-async fn discover() -> Option<String> {
-    let s = UdpSocket::bind(("0.0.0.0", 0)).await.ok()?;
-    s.set_broadcast(true).ok()?;
-    s.send_to(mm_core::DISCOVER_ASK, ("255.255.255.255", DEFAULT_PORT)).await.ok()?;
-    let mut buf = [0u8; 128];
-    let (n, from) = tokio::time::timeout(Duration::from_millis(1500), s.recv_from(&mut buf)).await.ok()?.ok()?;
-    buf[..n].starts_with(mm_core::DISCOVER_REPLY_PREFIX).then(|| from.ip().to_string())
-}
-
-/// All PCs answering on the LAN: (address, name). For the "Find PC" button.
+/// All PCs answering on the LAN: (address, name). Waits up to 1.5 s for the first answer and
+/// 200 ms more for others; at most 16, each address once.
 pub async fn discover_all() -> Vec<(String, String)> {
     let Ok(s) = UdpSocket::bind(("0.0.0.0", 0)).await else { return vec![] };
     let _ = s.set_broadcast(true);
     let _ = s.send_to(mm_core::DISCOVER_ASK, ("255.255.255.255", DEFAULT_PORT)).await;
-    let mut out = vec![];
+    let mut out: Vec<(String, String)> = vec![];
     let mut buf = [0u8; 128];
-    while let Ok(Ok((n, from))) = tokio::time::timeout(Duration::from_millis(1500), s.recv_from(&mut buf)).await {
+    let mut deadline = tokio::time::Instant::now() + Duration::from_millis(1500);
+    while let Ok(Ok((n, from))) = tokio::time::timeout_at(deadline, s.recv_from(&mut buf)).await {
         if let Some(name) = buf[..n].strip_prefix(mm_core::DISCOVER_REPLY_PREFIX) {
-            out.push((from.ip().to_string(), String::from_utf8_lossy(name).into_owned()));
+            let ip = from.ip().to_string();
+            if !out.iter().any(|x| x.0 == ip) {
+                out.push((ip, String::from_utf8_lossy(name).into_owned()));
+                deadline = deadline.min(tokio::time::Instant::now() + Duration::from_millis(200));
+            }
+        }
+        if out.len() >= 16 {
+            break;
         }
     }
     out
 }
 
-async fn open(channel: Channel) -> Result<(secure::Sender, secure::Receiver, String, String), secure::Error> {
-    let c = config::get();
-    let key = config::pairing_key().ok_or("Enter the pairing key shown on the PC")?;
-    let host = if c.host.trim().is_empty() { discover().await.ok_or("no PC found on the network: enter its address")? } else { c.host.trim().to_string() };
-    let addr = if host.contains(':') && !host.starts_with('[') && host.matches(':').count() == 1 { host.clone() } else { format!("{host}:{DEFAULT_PORT}") };
+/// The PC found by discovery that last completed the handshake: the other channels dial it
+/// directly instead of asking the LAN again.
+static FOUND: Mutex<Option<String>> = Mutex::new(None);
+
+async fn dial(host: &str, key: &secure::PairingKey, channel: Channel) -> Result<(secure::Sender, secure::Receiver, String), secure::Error> {
+    let addr = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{host}]:{DEFAULT_PORT}")
+    } else if host.rsplit_once(':').is_some_and(|(_, p)| p.parse::<u16>().is_ok()) {
+        host.to_string()
+    } else {
+        format!("{host}:{DEFAULT_PORT}")
+    };
     let s = tokio::time::timeout(Duration::from_secs(3), TcpStream::connect(&addr)).await.map_err(|_| format!("{addr}: no answer"))??;
-    let (mut tx, mut rx) = secure::connect(s, &key).await.map_err(|_| "the PC refused the pairing key")?;
+    // a wrong key, but also any other program on that port, fails here
+    let (mut tx, mut rx) = secure::connect(s, key).await.map_err(|_| format!("{addr}: handshake failed (wrong pairing key?)"))?;
     tx.send(&Msg::Hello { version: PROTOCOL_VERSION, name: sys::hostname(), channel }).await?;
-    let Msg::Hello { version, name, .. } = rx.recv().await? else { return Err("unexpected reply".into()) };
+    let hello = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.map_err(|_| format!("{addr}: no hello"))??;
+    let Msg::Hello { version, name, .. } = hello else { return Err("unexpected reply".into()) };
     if !(mm_core::proto::MIN_COMPATIBLE_VERSION..=PROTOCOL_VERSION).contains(&version) {
         return Err(format!("{name} runs an incompatible MirrorMagic version").into());
     }
     PEER_VERSION.store(version, Ordering::SeqCst);
-    Ok((tx, rx, name, host))
+    Ok((tx, rx, name))
+}
+
+async fn open(channel: Channel) -> Result<(secure::Sender, secure::Receiver, String, String), secure::Error> {
+    let c = config::get();
+    let key = config::pairing_key().ok_or("Enter the pairing key shown on the PC")?;
+    let fixed = c.host.trim().to_string();
+    let found = FOUND.lock().unwrap().clone();
+    // every PC that answers is tried: the first answer may come from a machine without the key
+    let hosts: Vec<String> = match (fixed.is_empty(), found) {
+        (false, _) => vec![fixed],
+        (true, Some(h)) => vec![h],
+        (true, None) => discover_all().await.into_iter().map(|x| x.0).collect(),
+    };
+    let mut last: secure::Error = "no PC found on the network: enter its address".into();
+    for host in hosts {
+        match dial(&host, &key, channel).await {
+            Ok((tx, rx, name)) => {
+                *FOUND.lock().unwrap() = Some(host.clone());
+                return Ok((tx, rx, name, host));
+            }
+            Err(e) => last = e,
+        }
+    }
+    *FOUND.lock().unwrap() = None; // ask the LAN again next time
+    Err(last)
 }
 
 async fn client_loop() {
@@ -367,7 +403,18 @@ fn hdmi_off() {
 
 fn hdmi_off_now() {
     static LAST_ERR: Mutex<String> = Mutex::new(String::new());
+    if sys::external_count() > 1 {
+        // which one is the shared monitor is unknown: switching off the wrong screen is worse
+        static SAID: AtomicBool = AtomicBool::new(false);
+        if !SAID.swap(true, Ordering::SeqCst) {
+            status::log("HDMI output left on: more than one external display is connected");
+        }
+        return;
+    }
     let Some(id) = sys::external_display() else { return };
+    if HDMI_OFF.lock().unwrap().is_some_and(|off| off != id) {
+        return; // the shared monitor is off already: this is another display, plugged in later
+    }
     let r = sys::set_display_enabled(id, false);
     match &r {
         Ok(()) => {
@@ -553,7 +600,7 @@ fn handle(m: Msg, utx: &mpsc::UnboundedSender<Msg>) {
                 let _ = utx.send(Msg::DdcResult { ok: r.is_ok(), detail: r.unwrap_or_else(|e| e) });
             });
         }
-        Msg::FilesOffer { id, count, bytes, names } => {
+        Msg::FilesOffer { id, count, bytes, names } if config::get().clipboard => {
             // files copied on the PC: fetch them on a separate connection, then put them on the clipboard
             status::log(format!("clipboard: PC offers {count} file(s) {names:?}"));
             status::update(|s| s.clipboard = format!("receiving {count} file(s)…"));
@@ -666,12 +713,12 @@ fn camera_watch() {
             Cmd::Start => {
                 status::log(format!("camera: an app opened it (devices: {:?})", sys::cameras()));
                 set_camera_wanted(true, &mut task);
-                rt.spawn(async { setup_obs(true).await });
+                rt.spawn(async { setup_obs(true, false).await });
             }
             Cmd::Resume => {
                 if let Err(e) = rt.block_on(obs::set_virtualcam(true)) {
                     status::log(format!("camera: OBS resume failed: {e}"));
-                    rt.spawn(async { setup_obs(true).await });
+                    rt.spawn(async { setup_obs(true, false).await });
                 }
             }
             Cmd::Stop => {
@@ -790,7 +837,7 @@ fn audio_watch() {
         }
         let active = want != (None, None);
         wtx.send_replace(want); // `send` drops the value while no stream listens yet
-        if active && task.as_ref().is_none_or(|t| t.is_finished()) && status::get().connected && PEER_VERSION.load(Ordering::SeqCst) >= 7 {
+        if active && !config::paused() && task.as_ref().is_none_or(|t| t.is_finished()) && status::get().connected && PEER_VERSION.load(Ordering::SeqCst) >= 7 {
             task = Some(RT.get().unwrap().spawn(audio_stream(wtx.subscribe())));
         }
     }
@@ -832,6 +879,9 @@ async fn audio_stream(mut want: watch::Receiver<Want>) {
     let mut sent: Option<Want> = None;
     let (mut chunks, mut peak) = (0u64, 0u16);
     let r: Result<(), secure::Error> = loop {
+        if config::paused() {
+            break Ok(()); // pause ends the sound too, not only the input session
+        }
         let w = want.borrow_and_update().clone();
         if sent.as_ref() != Some(&w) {
             if w == (None, None) {

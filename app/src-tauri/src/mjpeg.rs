@@ -21,14 +21,35 @@ pub fn part(jpeg: &[u8]) -> Vec<u8> {
     v
 }
 
+/// Only requests addressed to this loopback endpoint: a web page that re-points its own host
+/// name at 127.0.0.1 (DNS rebinding) still sends that name as Host.
+fn host_ok(req: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(req).to_ascii_lowercase();
+    match text.lines().find_map(|l| l.strip_prefix("host:")) {
+        Some(h) => matches!(h.trim(), "127.0.0.1:24851" | "localhost:24851"),
+        // HTTP/1.0 clients send none, but then the whole header must be here: a request line
+        // that fills the buffer would hide the Host line behind it
+        None => text.contains("\r\n\r\n"),
+    }
+}
+
 pub async fn serve(frames: Frames) {
-    let Ok(l) = TcpListener::bind(("127.0.0.1", PORT)).await else { return };
+    let l = match TcpListener::bind(("127.0.0.1", PORT)).await {
+        Ok(l) => l,
+        Err(e) => {
+            crate::status::log(format!("camera: port {PORT} unavailable ({e}): OBS gets no picture"));
+            return crate::status::update(|s| s.camera_detail = format!("port {PORT} is in use by another program: {e}"));
+        }
+    };
     loop {
         let Ok((mut s, _)) = l.accept().await else { continue };
         let mut rx = frames.clone();
         tokio::spawn(async move {
             let mut req = [0u8; 1024];
-            let _ = tokio::time::timeout(Duration::from_secs(2), s.read(&mut req)).await;
+            let n = tokio::time::timeout(Duration::from_secs(2), s.read(&mut req)).await.ok().and_then(Result::ok).unwrap_or(0);
+            if !host_ok(&req[..n]) {
+                return;
+            }
             let head = format!("HTTP/1.0 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary={BOUNDARY}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n");
             if s.write_all(head.as_bytes()).await.is_err() {
                 return;
@@ -56,6 +77,16 @@ pub async fn serve(frames: Frames) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_loopback_hosts_are_served() {
+        assert!(super::host_ok(b"GET /camera.mjpg HTTP/1.1\r\nHost: 127.0.0.1:24851\r\n\r\n"));
+        assert!(super::host_ok(b"GET / HTTP/1.1\r\nhost: LOCALHOST:24851\r\n\r\n"));
+        assert!(super::host_ok(b"GET / HTTP/1.0\r\n\r\n"));
+        assert!(!super::host_ok(b"GET / HTTP/1.1\r\nHost: evil.example:24851\r\n\r\n"));
+        assert!(!super::host_ok(format!("GET /{} HTTP/1.1\r\n", "a".repeat(1000)).as_bytes())); // Host cut off
+        assert!(!super::host_ok(b""));
+    }
+
     #[test]
     fn part_framing() {
         let p = super::part(&[0xFF, 0xD8, 0xFF, 0xD9]);

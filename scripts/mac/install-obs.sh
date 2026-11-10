@@ -10,7 +10,8 @@ app="$mnt/OBS.app"
 sig=$(spctl -a -vv -t exec "$app" 2>&1)
 echo "$sig"
 if echo "$sig" | grep -q "accepted" && echo "$sig" | grep -q "Notarized Developer ID" && codesign -dv "$app" 2>&1 | grep -q "TeamIdentifier=2MMRE5MTB8"; then
-  rm -rf /Applications/OBS.app && ditto "$app" /Applications/OBS.app && echo "OBS INSTALLED"
+  # copy first: a failed copy must not leave the Mac without OBS
+  rm -rf /Applications/OBS.app.new && ditto "$app" /Applications/OBS.app.new && rm -rf /Applications/OBS.app && mv /Applications/OBS.app.new /Applications/OBS.app && echo "OBS INSTALLED"
 else
   codesign -dv "$app" 2>&1 | grep -E "Authority|TeamIdentifier"
   echo "FAIL signature check"

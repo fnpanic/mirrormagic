@@ -37,8 +37,12 @@ pub struct Config {
     /// Off: Mac keyboard positions, Ctrl = Control, Win = Option, Alt = Command. (Replaces the
     /// former `ctrl_is_cmd`, which defaulted to on; an old saved value is ignored on purpose.)
     pub windows_shortcuts: bool,
-    /// PC: stream the webcam microphone together with the camera.
+    /// PC: a PC microphone may stream while a Mac app uses its "– PC" device.
     pub mic: bool,
+    /// PC: the webcam may stream while a Mac app uses the camera.
+    pub camera: bool,
+    /// PC: model name of the shared monitor for DDC; empty = the first monitor that answers.
+    pub ddc_monitor: String,
     /// Set while MirrorMagic mirrors the Mac screen for monitor mode (undone at the next start after a crash).
     pub mirrored: bool,
     /// Mac: the shared monitor's display while MirrorMagic has its HDMI output off. macOS keeps
@@ -69,6 +73,8 @@ impl Default for Config {
             camera_auto: true,
             windows_shortcuts: false,
             mic: true,
+            camera: true,
+            ddc_monitor: String::new(),
             mirrored: false,
             hdmi_off: None,
             paused: false,
@@ -92,7 +98,18 @@ static CONFIG: OnceLock<Mutex<Config>> = OnceLock::new();
 
 fn cell() -> &'static Mutex<Config> {
     CONFIG.get_or_init(|| {
-        let mut c: Config = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let mut c = match std::fs::read(path()).ok().map(|b| serde_json::from_slice::<Config>(&b)) {
+            Some(Ok(c)) => c,
+            Some(Err(e)) => {
+                // keep the damaged file: defaults (and on the PC a new pairing key) replace it
+                let _ = std::fs::rename(path(), path().with_extension("json.bad"));
+                let msg = format!("settings file was damaged ({e}): kept as config.json.bad, defaults restored");
+                crate::status::log(&msg);
+                let _ = LOAD_ERROR.set(msg);
+                Config::default()
+            }
+            None => Config::default(),
+        };
         if cfg!(windows) && PairingKey::parse(&c.pairing_key).is_none() {
             // the PC owns the secret; the Mac gets it typed/pasted in once
             c.pairing_key = PairingKey::generate().to_display();
@@ -111,12 +128,28 @@ pub fn paused() -> bool {
     PAUSED.load(Ordering::SeqCst)
 }
 
+/// Set when the settings file was damaged at start: shown in the window for this whole run.
+static LOAD_ERROR: OnceLock<String> = OnceLock::new();
+
+pub fn load_error() -> Option<String> {
+    cell();
+    LOAD_ERROR.get().cloned()
+}
+
+/// The last save problem, for the window (taken once).
+static ERROR: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn take_error() -> Option<String> {
+    cell();
+    ERROR.lock().unwrap().take()
+}
+
 fn save_to_disk(c: &Config) {
     let p = path();
     let _ = std::fs::create_dir_all(p.parent().unwrap());
     let tmp = p.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_vec_pretty(c).unwrap()).is_ok() {
-        let _ = std::fs::rename(&tmp, &p);
+    if let Err(e) = std::fs::write(&tmp, serde_json::to_vec_pretty(c).unwrap()).and_then(|()| std::fs::rename(&tmp, &p)) {
+        *ERROR.lock().unwrap() = Some(format!("settings could not be saved: {e}"));
     }
 }
 

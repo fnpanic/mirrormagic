@@ -16,7 +16,7 @@ export function hotkeyFromEvent(e: KeyLike): string | null {
   if (["Control", "Alt", "Shift", "Meta", "AltGraph", "OS"].includes(e.key)) return null;
   // On German (and other European) layouts Windows treats Ctrl+Alt as AltGr. For keys that
   // produce an AltGr character (M → µ, Q → @, 7 → {, …) the browser reports AltGraph instead of
-  // Ctrl+Alt, so count AltGraph as Ctrl+Alt, which is what the PC's keyboard hook sees.
+  // Ctrl+Alt, so count AltGraph as Ctrl+Alt: that is the combination the user pressed.
   const altGr = e.getModifierState?.("AltGraph") ?? false;
   const parts: string[] = [];
   if (e.ctrlKey || altGr) parts.push("Ctrl");
@@ -28,9 +28,10 @@ export function hotkeyFromEvent(e: KeyLike): string | null {
   return parts.join("+");
 }
 
-// A hotkey needs a modifier unless it is a function key, so normal typing never triggers it.
+// A hotkey needs Ctrl, Alt or Win unless it is a function key, so normal typing never triggers
+// it (Shift+A is a capital A). Same rule as Hotkey::is_usable on the Rust side.
 export function isUsableHotkey(h: string): boolean {
   const parts = h.split("+");
   const key = parts[parts.length - 1];
-  return parts.length > 1 || /^F([1-9]|1[0-9]|2[0-4])$/.test(key);
+  return parts.slice(0, -1).some((m) => m !== "Shift") || /^F([1-9]|1[0-9]|20)$/.test(key);
 }

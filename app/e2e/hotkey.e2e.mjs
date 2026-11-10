@@ -13,17 +13,17 @@ const server = spawn("npx", ["vite", "preview", "--port", String(PORT), "--stric
 
 const mock = () => {
   const status = { connected: true, peer: "Mac", peer_addr: "", rtt_ms: 3, control: "local", monitor_on_mac: false,
-    ddc: { monitor: "VX3276", current: 15, inputs: [15, 17], last: "" }, camera_on: false, camera_detail: "", camera_wanted: false,
+    ddc: { monitor: "VX3276", monitors: ["VX3276"], inputs: [15, 17], last: "" }, camera_on: false, camera_detail: "", camera_wanted: false,
     mic_detail: "", can_inject: true, displays: [], obs: { installed: false, running: false, virtualcam: false, detail: "" }, last_error: "", clipboard: "" };
   const config = { clipboard: true, pairing_key: "ABCD", side: "Left", edge_enabled: true, monitor_hotkey: "Ctrl+Alt+M", mac_input: 17, pc_input: 15,
     camera_width: 1280, camera_height: 720, camera_fps: 30, host: "", speed: 1, invert_scroll: false, german_fixups: null, obs_password: "",
-    camera_auto: true, ctrl_is_cmd: true, mic: true };
+    camera_auto: true, windows_shortcuts: false, mic: true, camera: true, ddc_monitor: "" };
   window.__saved = [];
   let cb = 0;
   window.__TAURI_INTERNALS__ = {
     transformCallback: () => ++cb,
     invoke: async (cmd, args) => {
-      if (cmd === "snapshot") return { role: "pc", version: "test", config: { ...config }, pairingValid: true, hotkeyValid: true, autostart: true, status, inputs: [] };
+      if (cmd === "snapshot") return { role: "pc", version: "test", config: { ...config }, pairingValid: true, autostart: true, status, notice: null };
       if (cmd === "save_config") { window.__saved.push(args.patch); Object.assign(config, args.patch); return null; }
       return null;
     },

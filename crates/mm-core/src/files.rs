@@ -62,12 +62,27 @@ pub fn plan(paths: &[PathBuf]) -> Result<Plan, String> {
 }
 
 /// A relative path from the peer, made safe: no absolute paths, drive letters or `..`.
+/// Characters Windows forbids in names become `_` (a Finder "/" arrives as ':'), so one awkward
+/// name does not fail the whole transfer.
 pub fn safe_rel(rel: &str) -> Option<PathBuf> {
     let mut out = PathBuf::new();
     for part in rel.split(['/', '\\']) {
-        match Path::new(part).components().next() {
-            None => continue,
-            Some(Component::Normal(_)) if !part.contains(':') => out.push(part),
+        let b = part.as_bytes();
+        if part.is_empty() {
+            continue;
+        }
+        if part == "." || part == ".." || (b.len() == 2 && b[1] == b':' && b[0].is_ascii_alphabetic()) {
+            return None;
+        }
+        let clean: String = part.chars().map(|c| if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*') || c.is_control() { '_' } else { c }).collect();
+        // Windows drops trailing dots and spaces ("..." would become nothing) and treats NUL, COM1 … as devices
+        let mut clean = clean.trim_end_matches(['.', ' ']).to_string();
+        let stem = clean.split('.').next().unwrap_or("").to_ascii_uppercase();
+        if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.as_bytes()[3].is_ascii_digit()) {
+            clean.insert(0, '_');
+        }
+        match Path::new(&clean).components().next() {
+            Some(Component::Normal(_)) => out.push(clean),
             _ => return None,
         }
     }
@@ -105,7 +120,7 @@ pub async fn recv(rx: &mut Receiver, dest: &Path, mut progress: impl FnMut(u64))
             Msg::FilesEnd => return Ok(tops),
             Msg::FileEntry { path, size, dir } => {
                 count += 1;
-                total += size;
+                total = total.saturating_add(size); // a wrapped sum would pass the limit
                 if count > MAX_ITEMS || total > MAX_BYTES {
                     return Err("transfer too large".into());
                 }
@@ -153,5 +168,34 @@ mod tests {
         assert_eq!(safe_rel("/etc/passwd"), Some(PathBuf::from("etc").join("passwd"))); // leading '/' only splits
         assert_eq!(safe_rel("C:/Windows/x"), None);
         assert_eq!(safe_rel(""), None);
+        assert_eq!(safe_rel("a/./b"), None);
+        // names Windows refuses are renamed, not refused
+        assert_eq!(safe_rel("Notes 10:11?.txt"), Some(PathBuf::from("Notes 10_11_.txt")));
+        assert_eq!(safe_rel("a/.../x"), None);
+        assert_eq!(safe_rel(".. /x"), None);
+        assert_eq!(safe_rel("nul.txt"), Some(PathBuf::from("_nul.txt")));
+        assert_eq!(safe_rel("report. "), Some(PathBuf::from("report")));
+    }
+
+    #[tokio::test]
+    async fn announced_sizes_cannot_wrap_past_the_limit() {
+        use crate::secure::{accept, connect, PairingKey};
+        let key = PairingKey::generate();
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let k = key.clone();
+        let peer = tokio::spawn(async move {
+            let (mut tx, _rx) = connect(tokio::net::TcpStream::connect(addr).await.unwrap(), &k).await.unwrap();
+            tx.send(&Msg::FileEntry { path: "a".into(), size: 1, dir: false }).await.unwrap();
+            tx.send(&Msg::FileData { data: vec![0] }).await.unwrap();
+            let _ = tx.send(&Msg::FileEntry { path: "b".into(), size: u64::MAX, dir: false }).await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        });
+        let (_tx, mut rx) = accept(l.accept().await.unwrap().0, &key).await.unwrap();
+        let dest = std::env::temp_dir().join(format!("mm-wrap-test-{}", std::process::id()));
+        let r = recv(&mut rx, &dest, |_| {}).await;
+        let _ = std::fs::remove_dir_all(&dest);
+        assert_eq!(r.unwrap_err().to_string(), "transfer too large");
+        peer.await.unwrap();
     }
 }

@@ -29,13 +29,26 @@ pub fn parse_inputs(caps: &str) -> Vec<u16> {
     rest[..end].split_whitespace().filter_map(|h| u16::from_str_radix(h, 16).ok()).collect()
 }
 
-/// The first display that answers a 0x60 read. Returns (display, name, current value).
+fn name(d: &Display) -> String {
+    d.info.model_name.clone().unwrap_or_else(|| d.info.id.clone())
+}
+
+/// The shared monitor: the one picked in the settings (`config.ddc_monitor`), else the first
+/// display that answers a 0x60 read. Returns (display, name, current value).
+// shortcut: picked by model name, two monitors of the same model can't be told apart
 fn find() -> Result<(Display, String, u16), String> {
+    let want = crate::config::get().ddc_monitor;
+    let displays = Display::enumerate();
+    // a picked monitor that is gone (unplugged, replaced) must not switch DDC off for good
+    let want = if displays.iter().any(|d| name(d) == want) { want } else { String::new() };
     let mut last = "no DDC/CI capable monitor found".to_string();
-    for mut d in Display::enumerate() {
+    for mut d in displays {
+        if !want.is_empty() && name(&d) != want {
+            continue;
+        }
         match d.handle.get_vcp_feature(VCP_INPUT) {
             Ok(v) => {
-                let name = d.info.model_name.clone().unwrap_or_else(|| d.info.id.clone());
+                let name = name(&d);
                 // monitors may report the value in the low byte only
                 return Ok((d, name, v.value() & 0xFF));
             }
@@ -48,19 +61,22 @@ fn find() -> Result<(Display, String, u16), String> {
 #[derive(Debug, Default, Clone)]
 pub struct Probe {
     pub monitor: String,
-    pub current: Option<u16>,
+    /// Every monitor that answers DDC (for the picker when there are several).
+    pub monitors: Vec<String>,
     pub inputs: Vec<u16>,
     pub error: String,
 }
 
 pub fn probe() -> Probe {
     let _g = LOCK.lock().unwrap();
+    let mut monitors: Vec<String> = Display::enumerate().into_iter().filter_map(|mut d| d.handle.get_vcp_feature(VCP_INPUT).ok().map(|_| name(&d))).collect();
+    monitors.dedup();
     match find() {
-        Ok((mut d, monitor, current)) => {
+        Ok((mut d, monitor, _)) => {
             let inputs = d.handle.capabilities_string().map(|c| parse_inputs(&String::from_utf8_lossy(&c))).unwrap_or_default();
-            Probe { monitor, current: Some(current), inputs, error: String::new() }
+            Probe { monitor, monitors, inputs, error: String::new() }
         }
-        Err(error) => Probe { error, ..Default::default() },
+        Err(error) => Probe { error, monitors, ..Default::default() },
     }
 }
 

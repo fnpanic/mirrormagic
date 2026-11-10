@@ -42,6 +42,25 @@ pub fn reload_config() {
     primary().set_config(cfg);
 }
 
+/// The window records a new hotkey: the current one must not fire meanwhile (saving reloads it).
+pub fn hotkey_recording(on: bool) {
+    if on {
+        primary().cfg.monitor_hotkey = None;
+    } else {
+        reload_config();
+    }
+}
+
+/// Quit: give the monitor and the input back first, then the cursor scheme.
+pub fn shutdown() {
+    let monitor = primary().monitor_on_mac;
+    release();
+    if monitor {
+        std::thread::sleep(Duration::from_millis(1500)); // the DDC switch runs on its own thread
+    }
+    win::restore_cursors();
+}
+
 fn run(out: Out) -> bool {
     for a in out.actions {
         match a {
@@ -150,11 +169,7 @@ pub fn release() {
 
 /// Pause: monitor back to the PC first (the Mac still listens and switches it), then input.
 pub fn release_for_pause() {
-    if primary().monitor_on_mac {
-        toggle_monitor(); // also releases
-    } else {
-        release();
-    }
+    release(); // in monitor mode this toggles the monitor back as well
 }
 
 /// The session ended while monitor mode was on. Usually the monitor still shows the Mac (Wi-Fi
@@ -247,7 +262,11 @@ pub fn hooks_wanted(fullscreen_in_front: Option<String>) -> bool {
         return false; // no crossing, no hotkey: Windows input untouched
     }
     static GAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let game = fullscreen_in_front.is_some() && primary().state == State::Local;
+    // not while the monitor shows the Mac: the hotkey is the way back
+    let game = fullscreen_in_front.is_some() && {
+        let p = primary();
+        p.state == State::Local && !p.monitor_on_mac
+    };
     if GAME.swap(game, Ordering::SeqCst) != game {
         std::thread::spawn(move || {
             status::log(match fullscreen_in_front {
@@ -310,18 +329,39 @@ pub fn start(rt: &tokio::runtime::Handle) {
     rt.spawn(discovery());
     std::thread::spawn(maintenance);
     win::power::watch_display(on_display_state);
-    std::thread::spawn(|| {
-        let p = ddc::probe();
-        status::update(|s| {
-            s.ddc.monitor = p.monitor;
-            s.ddc.current = p.current;
-            s.ddc.inputs = p.inputs;
-            if !p.error.is_empty() {
-                s.ddc.last = p.error;
-            }
-        });
-    });
+    std::thread::spawn(probe_ddc);
     publish();
+}
+
+/// Reads the DDC monitors and the shared one's inputs (at start and when another monitor is picked).
+pub fn probe_ddc() {
+    let p = ddc::probe();
+    status::update(|s| {
+        s.ddc.monitor = p.monitor;
+        s.ddc.monitors = p.monitors;
+        s.ddc.inputs = p.inputs;
+        if !p.error.is_empty() {
+            s.ddc.last = p.error;
+        }
+    });
+}
+
+/// Bumped when the pairing key changes: every connection made with the old key ends.
+static KEY_GEN: AtomicU64 = AtomicU64::new(0);
+
+pub fn revoke_sessions() {
+    KEY_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Why a running connection must end now (`gen`: KEY_GEN when it was accepted).
+fn must_end(gen: u64) -> Option<&'static str> {
+    if config::paused() {
+        Some("paused")
+    } else if KEY_GEN.load(Ordering::SeqCst) != gen {
+        Some("pairing key changed")
+    } else {
+        None
+    }
 }
 
 /// Every 2 s while the PC has control: pick up monitor layout changes (resolution, a monitor
@@ -369,7 +409,12 @@ async fn server() {
         if let Ok((s, addr)) = l.accept().await {
             tokio::spawn(async move {
                 if let Err(e) = connection(s).await {
-                    log::info!("connection from {addr} ended: {e}");
+                    // once per kind: a Mac with a wrong key retries every 2 s
+                    static LAST: Mutex<String> = Mutex::new(String::new());
+                    let line = format!("connection from {} ended: {e}", addr.ip());
+                    if std::mem::replace(&mut *LAST.lock().unwrap(), line.clone()) != line {
+                        status::log(line);
+                    }
                 }
             });
         }
@@ -378,11 +423,22 @@ async fn server() {
 
 async fn connection(s: TcpStream) -> Result<(), secure::Error> {
     let addr = s.peer_addr()?;
+    // strangers get at most this many handshakes at a time (each holds buffers for up to 5 s)
+    static HANDSHAKES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(32);
+    let permit = HANDSHAKES.try_acquire().map_err(|_| "too many connections at once")?;
+    let gen = KEY_GEN.load(Ordering::SeqCst);
     let key = config::pairing_key().ok_or("no pairing key")?;
-    let (mut tx, mut rx) = secure::accept(s, &key).await.inspect_err(|_| {
-        status::update(|s| s.last_error = format!("refused {}: wrong pairing key", addr.ip()));
+    let (mut tx, mut rx) = secure::accept(s, &key).await.inspect_err(|e| {
+        // a port scan or a timeout lands here too: say what is known, and not over a working session
+        let why = if e.to_string().contains("timed out") { "no handshake" } else { "handshake failed (wrong pairing key?)" };
+        status::update(|s| {
+            if !s.connected {
+                s.last_error = format!("refused {}: {why}", addr.ip());
+            }
+        });
     })?;
     let hello = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.map_err(|_| "no hello")??;
+    drop(permit);
     let Msg::Hello { version, name, channel } = hello else { return Err("expected hello".into()) };
     // answer with the lower version: an older Mac keeps working while it waits for its update
     let agreed = version.min(PROTOCOL_VERSION);
@@ -399,15 +455,15 @@ async fn connection(s: TcpStream) -> Result<(), secure::Error> {
         status::log(format!("{name} connected with protocol {agreed}"));
     }
     match channel {
-        Channel::Control => control(tx, rx, name, addr.ip().to_string()).await,
-        Channel::Camera => camera_channel(tx, rx).await,
-        Channel::Files => files_channel(tx, rx).await,
-        Channel::Audio if agreed >= 7 => audio_channel(tx, rx).await,
+        Channel::Control => control(tx, rx, name, addr.ip().to_string(), gen).await,
+        Channel::Camera => camera_channel(tx, rx, gen).await,
+        Channel::Files => files_channel(tx, rx).await, // shortcut: a transfer in flight finishes after a key change
+        Channel::Audio if agreed >= 7 => audio_channel(tx, rx, gen).await,
         Channel::Audio => Err("audio needs MirrorMagic 0.5.14 on both sides".into()),
     }
 }
 
-async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String, addr: String) -> Result<(), secure::Error> {
+async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String, addr: String, gen: u64) -> Result<(), secure::Error> {
     let id = SESSION.fetch_add(1, Ordering::SeqCst) + 1;
     let (utx, mut urx) = mpsc::unbounded_channel::<Msg>();
     *CTRL_TX.lock().unwrap() = Some(utx.clone()); // a newer Mac session replaces an old one
@@ -447,12 +503,13 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
             }
         })
     };
+    let mut first = true;
     let result: Result<(), secure::Error> = async {
         loop {
             // pings go out every 2 s, so silence for 7 s means the Mac is gone (sleep, Wi-Fi)
             let m = tokio::time::timeout(Duration::from_secs(7), rx.recv()).await.map_err(|_| "peer timed out")??;
-            if config::paused() {
-                return Err("paused".into()); // the Mac pings every 2 s, so this ends within 2 s
+            if let Some(why) = must_end(gen) {
+                return Err(why.into()); // the Mac pings every 2 s, so this ends within 2 s
             }
             match m {
                 Msg::Leave { along } => {
@@ -465,7 +522,8 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
                         s.can_inject = can_inject;
                     });
                     let ready = primary().connected;
-                    if can_inject != ready {
+                    // a session that replaced a live one starts with an idle Mac cursor: enter again
+                    if std::mem::take(&mut first) || can_inject != ready {
                         let out = if can_inject { primary().connected() } else { primary().disconnected() };
                         run(out);
                     }
@@ -484,7 +542,7 @@ async fn control(mut tx: secure::Sender, mut rx: secure::Receiver, name: String,
                     std::thread::spawn(move || clipboard::receive(text, html, png));
                 }
                 Msg::CameraWanted { on } => camera_wanted(on),
-                Msg::FilesOffer { id, count, bytes, names } => {
+                Msg::FilesOffer { id, count, bytes, names } if config::get().clipboard => {
                     status::log(format!("clipboard: Mac offers {count} file(s) {names:?}"));
                     status::update(|s| s.clipboard = format!("receiving {count} file(s)…"));
                     PENDING_FILES.lock().unwrap().insert(id, bytes);
@@ -531,8 +589,24 @@ static AUD_TX: Mutex<Option<mpsc::Sender<Msg>>> = Mutex::new(None);
 /// Stops the running microphone capture.
 static MIC_STOP: Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>> = Mutex::new(None);
 
+/// What the Mac asked for last (microphone by name, camera): the switches in the window apply to it.
+static MIC_WANT: Mutex<Option<String>> = Mutex::new(None);
+static CAM_WANT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// "Microphone" or "Camera" was switched in the window: stop or start what the Mac wants now.
+pub fn sharing_changed(mic: bool, camera: bool) {
+    if mic {
+        let want = MIC_WANT.lock().unwrap().clone();
+        mic_wanted(want);
+    }
+    if camera {
+        apply_camera();
+    }
+}
+
 /// A PC microphone (by name) streams while an app on the Mac records from its Mac device.
 fn mic_wanted(on: Option<String>) {
+    *MIC_WANT.lock().unwrap() = on.clone();
     let mut m = MIC_STOP.lock().unwrap();
     if let Some(stop) = m.take() {
         stop.store(true, Ordering::SeqCst);
@@ -552,12 +626,26 @@ fn mic_wanted(on: Option<String>) {
 }
 
 fn camera_wanted(on: bool) {
+    CAM_WANT.store(on, Ordering::SeqCst);
     status::update(|s| s.camera_wanted = on);
     status::log(format!("camera wanted: {on}"));
+    apply_camera();
+}
+
+fn apply_camera() {
+    let wanted = CAM_WANT.load(Ordering::SeqCst);
+    let on = wanted && config::get().camera;
     let mut cap = CAPTURE.lock().unwrap();
     if !on {
         *cap = None; // Drop stops the capture thread → camera light off
         CAM_GEN.fetch_add(1, Ordering::SeqCst);
+        // said here: the capture thread's own "off" belongs to an old generation and is dropped
+        let detail = if wanted { "Camera sharing is switched off on the PC" } else { "" };
+        send(Msg::CameraState { on: false, detail: detail.into() });
+        status::update(|s| {
+            s.camera_on = false;
+            s.camera_detail = detail.into();
+        });
         return;
     }
     if cap.is_some() {
@@ -596,13 +684,14 @@ fn camera_wanted(on: bool) {
     ));
 }
 
-async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver) -> Result<(), secure::Error> {
+async fn camera_channel(mut tx: secure::Sender, mut rx: secure::Receiver, gen: u64) -> Result<(), secure::Error> {
     let (ftx, mut frx) = mpsc::channel::<Vec<u8>>(2);
     let me = CAM_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
     *CAM_TX.lock().unwrap() = Some(ftx);
     let r = loop {
         tokio::select! {
             f = frx.recv() => match f {
+                Some(_) if must_end(gen).is_some() => break Err("ended".into()),
                 Some(jpeg) => if let Err(e) = tx.send(&Msg::Frame { jpeg }).await { break Err(e) },
                 None => break Ok(()),
             },
@@ -621,7 +710,7 @@ static AUD_CHAN: AtomicU64 = AtomicU64::new(0);
 
 /// Opened by the Mac while an app there uses "PC Microphone" or "PC Speakers": the microphone
 /// goes out, the Mac's call sound comes in and plays on the PC's default output.
-async fn audio_channel(mut tx: secure::Sender, rx: secure::Receiver) -> Result<(), secure::Error> {
+async fn audio_channel(mut tx: secure::Sender, rx: secure::Receiver, gen: u64) -> Result<(), secure::Error> {
     let (reader, mut rx) = crate::audio::reader(rx);
     let (atx, mut arx) = mpsc::channel::<Msg>(64);
     let me = AUD_CHAN.fetch_add(1, Ordering::SeqCst) + 1;
@@ -629,8 +718,15 @@ async fn audio_channel(mut tx: secure::Sender, rx: secure::Receiver) -> Result<(
     let mut speaker = crate::audio::Player::default();
     let mut want: (Option<String>, Option<String>) = (None, None);
     let r = loop {
+        // pause and a new key end the sound too (every chunk passes here, 100 a second)
+        if let Some(why) = must_end(gen) {
+            break Err(why.into());
+        }
         tokio::select! {
-            a = arx.recv() => if let Some(m) = a { if let Err(e) = tx.send(&m).await { break Err(e) } },
+            a = arx.recv() => match a {
+                Some(m) => if let Err(e) = tx.send(&m).await { break Err(e) },
+                None => break Ok(()), // a newer audio channel took over: without this the loop spins
+            },
             m = rx.recv() => match m.unwrap_or(Err("closed".into())) {
                 Ok(Msg::AudioWant { mic, speaker: spk }) => {
                     if want != (mic.clone(), spk.clone()) {
